@@ -1,4 +1,5 @@
 using System.Numerics;
+using ArmageddonRidge.Core;
 using ArmageddonRidge.Core.Content;
 using ArmageddonRidge.Core.Game;
 using ArmageddonRidge.Core.Models;
@@ -55,6 +56,41 @@ public sealed class ProjectileSimulatorTests
         Assert.NotEmpty(visual.Trail);
         Assert.Equal(visual.ImpactPoint, planning.ImpactPoint);
         Assert.Equal(visual.StopReason, planning.StopReason);
+    }
+
+    [Fact]
+    public void SweptCollisionHitsSpriteSizedTankBody()
+    {
+        var heights = Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray();
+        var terrain = new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights);
+        var player = Tank("player", 160, terrain, 0);
+        var cpu = Tank("cpu", 260, terrain, 180);
+        player.Position = new Vector2(160, 620);
+        cpu.Position = new Vector2(260, 620);
+        var weapon = new WeaponCatalog().Get(WeaponIds.PeaShell);
+        var simulator = new ProjectileSimulator();
+
+        var result = simulator.Simulate(terrain, player, cpu, weapon, 0, 100, 0, maxSteps: 60);
+
+        Assert.Equal(ProjectileStopReason.TankHit, result.StopReason);
+        Assert.InRange(result.ImpactPoint.X, cpu.Position.X - (GameConstants.TankCollisionWidth / 2f) - GameConstants.ProjectileCollisionRadius, cpu.Position.X);
+    }
+
+    [Fact]
+    public void OwnerCollisionArmsOnlyAfterProjectileClearsLaunchTank()
+    {
+        var heights = Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray();
+        var terrain = new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights);
+        var player = Tank("player", 160, terrain, 5);
+        var cpu = Tank("cpu", 900, terrain, 175);
+        player.Position = new Vector2(160, 620);
+        cpu.Position = new Vector2(900, 620);
+        var weapon = new WeaponCatalog().Get(WeaponIds.PeaShell);
+        var simulator = new ProjectileSimulator();
+
+        var result = simulator.Simulate(terrain, player, cpu, weapon, 5, 1, 0, maxSteps: 180);
+
+        Assert.NotEqual(ProjectileStopReason.OwnerHit, result.StopReason);
     }
 
     private static Tank Tank(string id, float x, TerrainMask terrain, float angle)

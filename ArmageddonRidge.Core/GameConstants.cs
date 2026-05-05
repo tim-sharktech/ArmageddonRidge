@@ -8,6 +8,9 @@ public static class GameConstants
     public const int GroundMaxY = 650;
     public const int TankWidth = 32;
     public const int TankHeight = 18;
+    public const int TankCollisionWidth = 74;
+    public const int TankCollisionHeight = 46;
+    public const float ProjectileCollisionRadius = 5f;
     public const float FixedDeltaTime = 1f / 60f;
     public const float Gravity = 120f;
     public const int WindMin = -24;

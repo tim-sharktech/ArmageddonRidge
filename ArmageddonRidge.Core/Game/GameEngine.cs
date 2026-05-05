@@ -38,6 +38,7 @@ public sealed class GameEngine
         var player = CreateTank("player", "Ridge Runner", false, 160, terrain, 42);
         var cpuProfile = CpuRivalProfile.ForSeed(seed);
         var cpu = CreateTank("cpu", cpuProfile.TankName, true, GameConstants.WorldWidth - 160, terrain, 138);
+        SetTankHealth(cpu, CpuHealthFor(settings.Difficulty));
 
         player.Cash = settings.StartingCash;
         cpu.Cash = CpuBudget(settings.Difficulty, 1);
@@ -83,7 +84,7 @@ public sealed class GameEngine
         PlaceTank(state.PlayerTank, terrain, 150);
         PlaceTank(state.CpuTank, terrain, GameConstants.WorldWidth - 150);
         state.PlayerTank.Health = Math.Min(state.PlayerTank.Health + 15, state.PlayerTank.MaxHealth);
-        state.CpuTank.Health = GameConstants.StartingHealth;
+        SetTankHealth(state.CpuTank, CpuHealthFor(settings.Difficulty));
         state.CpuTank.Shield = settings.Difficulty >= Difficulty.Veteran ? 50 + (state.RoundNumber * 5) : 0;
         state.CpuTank.Cash = CpuBudget(settings.Difficulty, state.RoundNumber);
         SeedCpuInventory(state.CpuTank, settings, state.RoundNumber);
@@ -532,6 +533,22 @@ public sealed class GameEngine
         Difficulty.Oracle => 1000 + (round * 380),
         _ => 450 + (round * 170)
     };
+
+    private static int CpuHealthFor(Difficulty difficulty) => difficulty switch
+    {
+        Difficulty.Rookie => 50,
+        Difficulty.Normal => GameConstants.StartingHealth,
+        Difficulty.Veteran => 85,
+        Difficulty.Maniac => 90,
+        Difficulty.Oracle => 100,
+        _ => GameConstants.StartingHealth
+    };
+
+    private static void SetTankHealth(Tank tank, int health)
+    {
+        tank.MaxHealth = health;
+        tank.Health = health;
+    }
 
     private void SeedCpuInventory(Tank cpu, MatchSettings settings, int round)
     {

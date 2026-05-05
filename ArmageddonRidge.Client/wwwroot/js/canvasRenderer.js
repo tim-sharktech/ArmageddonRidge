@@ -708,16 +708,35 @@ function drawTrail(points, count = points.length, weaponId) {
     }
     ctx.stroke();
     const last = points[visibleCount - 1];
-    const prev = points[Math.max(0, visibleCount - 3)];
+    const prev = trajectoryReferencePoint(points, visibleCount);
+    const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
     drawFlameTip(last, prev, missileLike);
     if (isMopWeapon(weaponId)) {
         drawMopProjectile(last, prev);
     } else if (missileLike) {
-        drawOrientedSprite("missile", last.x, last.y, 34, 14, Math.atan2(last.y - prev.y, last.x - prev.x));
+        drawOrientedSprite("missile", last.x, last.y, 34, 14, angle);
     } else {
-        drawSprite("shell", last.x - 9, last.y - 5, 18, 9);
+        drawOrientedSprite("shell", last.x, last.y, 22, 9, angle);
     }
     ctx.restore();
+}
+
+function trajectoryReferencePoint(points, visibleCount) {
+    const last = points[Math.max(0, visibleCount - 1)];
+    for (let offset = 4; offset <= 12; offset += 2) {
+        const previous = points[Math.max(0, visibleCount - offset)];
+        if (!previous) {
+            continue;
+        }
+
+        const dx = last.x - previous.x;
+        const dy = last.y - previous.y;
+        if ((dx * dx) + (dy * dy) > 0.05) {
+            return previous;
+        }
+    }
+
+    return points[Math.max(0, visibleCount - 2)] ?? last;
 }
 
 function drawSmokeTrail(points, count, weaponId) {

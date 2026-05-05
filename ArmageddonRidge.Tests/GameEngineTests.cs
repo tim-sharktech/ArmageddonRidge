@@ -31,6 +31,18 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void RookieDifficultyUsesShorterCpuHealthPool()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(Difficulty: Difficulty.Rookie, TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+
+        Assert.Equal(50, state.CpuTank.MaxHealth);
+        Assert.Equal(50, state.CpuTank.Health);
+        Assert.Equal(GameConstants.StartingHealth, state.PlayerTank.MaxHealth);
+    }
+
+    [Fact]
     public void BuyingWeaponAddsInventoryAndSpendsCash()
     {
         var engine = CreateEngine();

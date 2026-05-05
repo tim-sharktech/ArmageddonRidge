@@ -17,7 +17,7 @@ public sealed class Tank
     public Dictionary<string, int> Inventory { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<UpgradeType> Upgrades { get; } = [];
 
-    public Vector2 Center => new(Position.X, Position.Y - (GameConstants.TankHeight / 2f));
+    public Vector2 Center => new(Position.X, Position.Y - (GameConstants.TankCollisionHeight / 2f));
 
     public bool IsDestroyed => Health <= 0;
 
