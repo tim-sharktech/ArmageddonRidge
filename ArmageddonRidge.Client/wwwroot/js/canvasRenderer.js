@@ -474,14 +474,54 @@ function strokeTerrainTop(terrain, step, yOffset = 0) {
 
 function drawRadiation(zones) {
     for (const zone of zones) {
-        ctx.beginPath();
-        ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(164, 255, 78, 0.16)";
-        ctx.fill();
-        ctx.strokeStyle = "rgba(164, 255, 78, 0.55)";
-        ctx.lineWidth = 4;
-        ctx.stroke();
+        drawRadiationZone(zone);
     }
+}
+
+function drawRadiationZone(zone) {
+    const x = Number(zone.x ?? 0);
+    const y = Number(zone.y ?? 0);
+    const radius = Number(zone.radius ?? 42);
+    const turns = Math.max(1, Number(zone.turns ?? 1));
+    const now = performance.now() * 0.001;
+    const pulse = 0.72 + Math.sin(now * 3.2 + x * 0.017) * 0.18;
+    const alpha = Math.min(0.34, 0.12 + turns * 0.055);
+
+    ctx.save();
+    ctx.translate(x, y + radius * 0.08);
+    ctx.scale(1, 0.34);
+
+    const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, radius);
+    glow.addColorStop(0, `rgba(255, 239, 112, ${alpha * pulse})`);
+    glow.addColorStop(0.48, `rgba(199, 177, 71, ${alpha * 0.42})`);
+    glow.addColorStop(1, "rgba(64, 53, 25, 0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.92, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.rotate(-0.62);
+    for (let stripe = -radius * 1.8; stripe < radius * 1.8; stripe += 22) {
+        ctx.fillStyle = (Math.round(stripe / 22) & 1) === 0
+            ? `rgba(242, 200, 55, ${0.18 * pulse})`
+            : `rgba(20, 22, 18, ${0.15 * pulse})`;
+        ctx.fillRect(stripe, -radius * 1.25, 9, radius * 2.5);
+    }
+    ctx.restore();
+
+    ctx.setLineDash([10, 12]);
+    ctx.strokeStyle = `rgba(255, 214, 72, ${0.42 * pulse})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.9, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    drawRadioactiveGlyph(x, y - Math.min(34, radius * 0.24), clamp(radius * 0.2, 24, 44), 0.78 * pulse);
 }
 
 function drawTank(tank, frameName) {
@@ -1127,8 +1167,8 @@ function drawExplosions(explosions, progress = 1) {
 
         const gradient = ctx.createRadialGradient(explosion.x, explosion.y, 2, explosion.x, explosion.y, bloom);
         gradient.addColorStop(0, "#fffdf0");
-        gradient.addColorStop(0.22, patriot ? "#9fd6ff" : explosion.nuclear ? "#d7ff6a" : lava ? "#fff06a" : penetrator ? "#ffd276" : "#ffdc68");
-        gradient.addColorStop(0.58, patriot ? "rgba(71, 165, 255, 0.58)" : explosion.nuclear ? "rgba(101, 197, 78, 0.58)" : lava ? "rgba(255, 80, 24, 0.78)" : penetrator ? "rgba(191, 92, 48, 0.72)" : "rgba(236, 106, 92, 0.72)");
+        gradient.addColorStop(0.22, patriot ? "#9fd6ff" : explosion.nuclear ? "#fff0a2" : lava ? "#fff06a" : penetrator ? "#ffd276" : "#ffdc68");
+        gradient.addColorStop(0.58, patriot ? "rgba(71, 165, 255, 0.58)" : explosion.nuclear ? "rgba(255, 136, 49, 0.64)" : lava ? "rgba(255, 80, 24, 0.78)" : penetrator ? "rgba(191, 92, 48, 0.72)" : "rgba(236, 106, 92, 0.72)");
         gradient.addColorStop(1, "rgba(28, 22, 18, 0)");
         ctx.fillStyle = gradient;
         ctx.beginPath();
@@ -1157,11 +1197,12 @@ function drawExplosions(explosions, progress = 1) {
             drawPenetratorShock(explosion, radius, progress);
         } else if (explosion.nuclear) {
             drawNukeColumn(explosion, radius, progress);
-            ctx.strokeStyle = `rgba(213, 255, 106, ${0.75 * fade})`;
+            ctx.strokeStyle = `rgba(255, 222, 82, ${0.75 * fade})`;
             ctx.lineWidth = 6;
             ctx.beginPath();
             ctx.arc(explosion.x, explosion.y, radius * (1.1 + progress * 1.15), 0, Math.PI * 2);
             ctx.stroke();
+            drawNuclearGroundFlash(explosion, radius, progress);
         } else if (lava) {
             drawLavaSplash(explosion, radius, progress);
         }
@@ -1224,22 +1265,119 @@ function drawNukeColumn(explosion, radius, progress) {
     const stemWidth = radius * (0.22 + progress * 0.18);
     const x = explosion.x;
     const y = explosion.y;
-    const gradient = ctx.createLinearGradient(x, y - stemHeight, x, y + radius * 0.25);
-    gradient.addColorStop(0, `rgba(225, 255, 166, ${0.06 * fade})`);
-    gradient.addColorStop(0.45, `rgba(241, 244, 205, ${0.22 * fade})`);
-    gradient.addColorStop(1, `rgba(79, 62, 48, ${0.32 * fade})`);
-    ctx.fillStyle = gradient;
+
+    const stemGradient = ctx.createLinearGradient(x, y - stemHeight, x, y + radius * 0.2);
+    stemGradient.addColorStop(0, `rgba(255, 235, 164, ${0.25 * fade})`);
+    stemGradient.addColorStop(0.48, `rgba(176, 132, 82, ${0.32 * fade})`);
+    stemGradient.addColorStop(1, `rgba(57, 45, 35, ${0.36 * fade})`);
+    ctx.fillStyle = stemGradient;
     ctx.beginPath();
     ctx.ellipse(x, y - stemHeight * 0.45, stemWidth, stemHeight * 0.55, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = `rgba(235, 255, 182, ${0.48 * (1 - progress)})`;
+    const capY = y - stemHeight * (0.82 + progress * 0.08);
+    const capRadius = radius * (0.72 + progress * 0.62);
+    const lobes = [
+        { dx: 0, dy: -0.1, rx: 0.72, ry: 0.36 },
+        { dx: -0.52, dy: 0.08, rx: 0.45, ry: 0.28 },
+        { dx: 0.52, dy: 0.06, rx: 0.48, ry: 0.3 },
+        { dx: -0.18, dy: -0.28, rx: 0.42, ry: 0.26 },
+        { dx: 0.2, dy: -0.3, rx: 0.42, ry: 0.26 }
+    ];
+
+    for (const lobe of lobes) {
+        const lobeGradient = ctx.createRadialGradient(
+            x + capRadius * lobe.dx,
+            capY + capRadius * lobe.dy,
+            2,
+            x + capRadius * lobe.dx,
+            capY + capRadius * lobe.dy,
+            capRadius * lobe.rx);
+        lobeGradient.addColorStop(0, `rgba(255, 246, 192, ${0.5 * fade})`);
+        lobeGradient.addColorStop(0.48, `rgba(181, 141, 93, ${0.42 * fade})`);
+        lobeGradient.addColorStop(1, `rgba(38, 33, 29, ${0.1 * fade})`);
+        ctx.fillStyle = lobeGradient;
+        ctx.beginPath();
+        ctx.ellipse(
+            x + capRadius * lobe.dx,
+            capY + capRadius * lobe.dy,
+            capRadius * lobe.rx,
+            capRadius * lobe.ry,
+            0,
+            0,
+            Math.PI * 2);
+        ctx.fill();
+    }
+
+    ctx.strokeStyle = `rgba(255, 232, 132, ${0.48 * (1 - progress)})`;
     ctx.lineWidth = 3;
     for (let i = 0; i < 3; i++) {
         ctx.beginPath();
-        ctx.arc(x, y - radius * (0.45 + i * 0.25), radius * (0.38 + progress * 0.72 + i * 0.16), 0, Math.PI * 2);
+        ctx.ellipse(
+            x,
+            capY + radius * (0.05 + i * 0.12),
+            radius * (0.48 + progress * 0.86 + i * 0.24),
+            radius * (0.18 + progress * 0.25 + i * 0.08),
+            0,
+            0,
+            Math.PI * 2);
         ctx.stroke();
     }
+
+    if (progress > 0.18) {
+        drawRadioactiveGlyph(x, capY, clamp(radius * 0.18, 28, 52), 0.62 * fade);
+    }
+}
+
+function drawNuclearGroundFlash(explosion, radius, progress) {
+    const fade = Math.max(0, 1 - progress * 0.72);
+    ctx.save();
+    ctx.translate(explosion.x, explosion.y + radius * 0.1);
+    ctx.scale(1, 0.28);
+    const flash = ctx.createRadialGradient(0, 0, radius * 0.12, 0, 0, radius * (1.45 + progress * 0.9));
+    flash.addColorStop(0, `rgba(255, 248, 176, ${0.36 * fade})`);
+    flash.addColorStop(0.46, `rgba(255, 170, 64, ${0.22 * fade})`);
+    flash.addColorStop(1, "rgba(255, 170, 64, 0)");
+    ctx.fillStyle = flash;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * (1.45 + progress * 0.9), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+function drawRadioactiveGlyph(x, y, size, alpha = 1) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.globalAlpha = clamp01(alpha);
+
+    ctx.fillStyle = "rgba(12, 14, 12, 0.72)";
+    ctx.beginPath();
+    ctx.arc(2, 3, size * 0.58, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#ffd64d";
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.52, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#151814";
+    ctx.lineWidth = Math.max(2, size * 0.08);
+    ctx.stroke();
+
+    ctx.fillStyle = "#151814";
+    for (let i = 0; i < 3; i++) {
+        const angle = (-Math.PI / 2) + (i * Math.PI * 2 / 3);
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(angle - 0.22) * size * 0.18, Math.sin(angle - 0.22) * size * 0.18);
+        ctx.arc(0, 0, size * 0.43, angle - 0.46, angle + 0.46);
+        ctx.lineTo(Math.cos(angle + 0.22) * size * 0.18, Math.sin(angle + 0.22) * size * 0.18);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
 }
 
 function isMissileWeapon(weaponId) {
