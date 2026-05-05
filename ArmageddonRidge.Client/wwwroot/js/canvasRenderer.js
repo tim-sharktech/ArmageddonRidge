@@ -582,6 +582,10 @@ function drawTank(tank, frameName) {
 
     drawTankSprite(tank, frameName);
 
+    if (Number(tank.buriedDepth ?? 0) > 4) {
+        drawBurialCover(tank);
+    }
+
     if (tank.shield > 0) {
         ctx.save();
         ctx.globalAlpha = 0.5 + Math.sin(performance.now() * 0.008) * 0.16;
@@ -592,6 +596,48 @@ function drawTank(tank, frameName) {
     if (tank.health <= 35) {
         drawSmokeStack(tank.x, tank.y - 54);
     }
+}
+
+function drawBurialCover(tank) {
+    const surfaceY = Number(tank.terrainY ?? tank.y - tank.buriedDepth);
+    const depth = clamp(Number(tank.buriedDepth ?? 0), 0, 74);
+    const width = 96;
+    const height = clamp(depth + 14, 16, 64);
+    const x = tank.x - width * 0.5;
+    const y = surfaceY - 3;
+
+    ctx.save();
+    const fill = ctx.createLinearGradient(0, y, 0, y + height);
+    fill.addColorStop(0, "#8fbf64");
+    fill.addColorStop(0.16, "#4f6d38");
+    fill.addColorStop(0.44, "#3d3327");
+    fill.addColorStop(1, "#201b15");
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y + 7);
+    ctx.quadraticCurveTo(tank.x - 22, y - 8, tank.x + 3, y + 2);
+    ctx.quadraticCurveTo(tank.x + 34, y - 7, x + width - 6, y + 9);
+    ctx.lineTo(x + width - 1, y + height);
+    ctx.lineTo(x + 1, y + height);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(159, 214, 94, 0.76)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y + 7);
+    ctx.quadraticCurveTo(tank.x - 22, y - 8, tank.x + 3, y + 2);
+    ctx.quadraticCurveTo(tank.x + 34, y - 7, x + width - 6, y + 9);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255, 235, 178, 0.16)";
+    for (let i = 0; i < 9; i++) {
+        const px = x + 10 + (i * 9) + (hash2d(i, Math.round(tank.x)) % 6);
+        const py = y + 13 + (hash2d(Math.round(tank.y), i) % Math.max(8, Math.floor(height - 10)));
+        ctx.fillRect(px, py, 2, 1);
+    }
+
+    ctx.restore();
 }
 
 function drawTankSprite(tank, baseFrameName) {

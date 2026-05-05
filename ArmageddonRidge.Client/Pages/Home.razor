@@ -43,7 +43,7 @@
     }
     else
     {
-        <div class="battle-layout @(_state.Phase == GamePhase.Battle ? "is-battle" : "")">
+        <div class="battle-layout @BattleLayoutCss">
             <section class="battlefield-panel @(_playerHurt ? "player-hurt" : "") @(_cpuHurt ? "cpu-hurt" : "")">
                 <canvas @ref="_canvas" class="battlefield" width="1200" height="700" aria-label="Armageddon Ridge battlefield"></canvas>
                 <div class="battle-hud @(AnyTankHurt ? "hurt-flash" : "")" aria-label="Battle health">
@@ -92,6 +92,37 @@
                         <span>Trail: @_state.LastPerformance.TrailPoints</span>
                     </div>
                 }
+                @if (_state.Phase == GamePhase.Battle)
+                {
+                    <div class="floating-command @(_battlePanelCollapsed ? "is-expanded" : "is-compact")" aria-label="Battle controls">
+                        <button class="command-toggle" title="@BattlePanelToggleTitle" @onclick="ToggleBattlePanel">
+                            @(_battlePanelCollapsed ? "Panel" : "Wide")
+                        </button>
+                        @if (_battlePanelCollapsed)
+                        {
+                            <div class="floating-fields">
+                                <label class="wide">
+                                    Weapon
+                                    <select @bind="_state.SelectedWeaponId">
+                                        @foreach (var weapon in AvailablePlayerWeapons)
+                                        {
+                                            <option value="@weapon.Id">@weapon.DisplayName (@InventoryLabel(weapon.Id))</option>
+                                        }
+                                    </select>
+                                </label>
+                                <label>
+                                    Angle <strong>@_state.PlayerTank.TurretAngle.ToString("0")</strong>
+                                    <input type="range" min="5" max="85" step="1" value="@_state.PlayerTank.TurretAngle" @oninput="HandleAngleInputAsync" />
+                                </label>
+                                <label>
+                                    Velocity <strong>@_power</strong>
+                                    <input type="range" min="1" max="100" step="1" @bind="_power" @bind:event="oninput" />
+                                </label>
+                                <button class="fire-button floating-fire" disabled="@(!CanFirePlayer)" @onclick="FirePlayerAsync">Fire</button>
+                            </div>
+                        }
+                    </div>
+                }
             </section>
 
             <aside class="hud-panel">
@@ -100,7 +131,13 @@
                         <span class="eyebrow">Round @_state.RoundNumber</span>
                         <h2>@_state.Phase</h2>
                     </div>
-                    <button title="Toggle performance overlay" @onclick="TogglePerf">FPS</button>
+                    <div class="hud-actions">
+                        @if (_state.Phase == GamePhase.Battle)
+                        {
+                            <button title="@BattlePanelToggleTitle" @onclick="ToggleBattlePanel">Wide</button>
+                        }
+                        <button title="Toggle performance overlay" @onclick="TogglePerf">FPS</button>
+                    </div>
                 </header>
 
                 <div class="tank-bars">
@@ -149,10 +186,10 @@
                             <input type="range" min="5" max="85" step="1" value="@_state.PlayerTank.TurretAngle" @oninput="HandleAngleInputAsync" />
                         </label>
                         <label>
-                            Power <strong>@_power</strong>
+                            Velocity <strong>@_power</strong>
                             <input type="range" min="1" max="100" step="1" @bind="_power" @bind:event="oninput" />
                         </label>
-                        <button class="fire-button" disabled="@(!_canFire)" @onclick="FirePlayerAsync">Fire</button>
+                        <button class="fire-button" disabled="@(!CanFirePlayer)" @onclick="FirePlayerAsync">Fire</button>
                         <p class="hint">@HintText</p>
                     </div>
                 }
@@ -199,6 +236,7 @@
     private bool _canFire = true;
     private bool _showPerf;
     private bool _settingsOpen;
+    private bool _battlePanelCollapsed;
     private bool _screenShake = true;
     private bool _reducedMotion;
     private float _sfxVolume = 0.9f;
@@ -217,6 +255,14 @@
     private int _damagePulse;
 
     private bool AnyTankHurt => _playerHurt || _cpuHurt;
+
+    private bool CanFirePlayer => _canFire && _state?.Phase == GamePhase.Battle && _state.CurrentTurn == TurnOwner.Player;
+
+    private string BattleLayoutCss => _state?.Phase == GamePhase.Battle
+        ? (_battlePanelCollapsed ? "is-battle panel-collapsed" : "is-battle")
+        : string.Empty;
+
+    private string BattlePanelToggleTitle => _battlePanelCollapsed ? "Show command panel" : "Hide command panel";
 
     private string WindText => _state is null
         ? "0"
@@ -276,6 +322,7 @@
         }
 
         Engine.StartBattle(_state);
+        _battlePanelCollapsed = true;
         await Audio.PlayAsync("menu");
         await RenderSceneAsync();
     }
@@ -433,8 +480,8 @@
                 visualKind = zone.VisualKind.ToString(),
                 lava = zone.VisualKind == ShotVisualKind.Lava || zone.VisualKind == ShotVisualKind.Fire
             }).ToArray(),
-            player = TankDto(_state.PlayerTank),
-            cpu = TankDto(_state.CpuTank)
+            player = TankDto(_state.PlayerTank, _state.Terrain),
+            cpu = TankDto(_state.CpuTank, _state.Terrain)
         };
     }
 
@@ -446,7 +493,7 @@
 
     private void MarkTerrainChanged() => _terrainRevision++;
 
-    private static object TankDto(Tank tank) => new
+    private static object TankDto(Tank tank, TerrainMask terrain) => new
     {
         id = tank.Id,
         x = tank.Position.X,
@@ -454,7 +501,9 @@
         angle = tank.TurretAngle,
         health = tank.Health,
         shield = tank.Shield,
-        isCpu = tank.IsCpu
+        isCpu = tank.IsCpu,
+        terrainY = terrain.GetSurfaceY(tank.Position.X),
+        buriedDepth = MathF.Max(0, tank.Position.Y - terrain.GetSurfaceY(tank.Position.X))
     };
 
     private static object WeatherDto(GameState state)
@@ -632,6 +681,10 @@
             case "`":
                 TogglePerf();
                 break;
+            case "h":
+            case "H":
+                ToggleBattlePanel();
+                break;
         }
     }
 
@@ -672,6 +725,14 @@
     }
 
     private void ToggleSettings() => _settingsOpen = !_settingsOpen;
+
+    private void ToggleBattlePanel()
+    {
+        if (_state?.Phase == GamePhase.Battle)
+        {
+            _battlePanelCollapsed = !_battlePanelCollapsed;
+        }
+    }
 
     private async Task ApplyAudioSettingsAsync()
     {

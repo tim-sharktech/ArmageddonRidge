@@ -162,6 +162,44 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void DirtDropCanCoverTankWithoutSettlingItOntoMound()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        const float surfaceY = 560f;
+
+        for (var angle = 25; angle <= 65; angle++)
+        {
+            for (var power = 35; power <= 75; power++)
+            {
+                var state = engine.NewMatch(settings);
+                var heights = Enumerable.Repeat(surfaceY, GameConstants.WorldWidth).ToArray();
+                state.Terrain.CopyFrom(new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights));
+                state.PlayerTank.Position = new Vector2(220, surfaceY);
+                state.CpuTank.Position = new Vector2(610, surfaceY);
+                state.PlayerTank.AddWeapon(WeaponIds.DirtDrop, 1);
+                state.SelectedWeaponId = WeaponIds.DirtDrop;
+                engine.StartBattle(state);
+                state.Wind = 0;
+
+                var result = engine.FireCurrentTurn(state, settings, angle, power);
+                var cpuTerrainY = state.Terrain.GetSurfaceY(state.CpuTank.Position.X);
+                if (!result.Explosions.Any(static explosion => explosion.DirtAdded)
+                    || cpuTerrainY >= surfaceY - 4f)
+                {
+                    continue;
+                }
+
+                Assert.Equal(surfaceY, state.CpuTank.Position.Y);
+                Assert.True(cpuTerrainY < state.CpuTank.Position.Y - 4f);
+                return;
+            }
+        }
+
+        Assert.Fail("Expected one deterministic Dirt Drop firing solution to cover the CPU tank.");
+    }
+
+    [Fact]
     public void PatriotBatteryInterceptsThreateningCpuShotAndIsConsumed()
     {
         var engine = CreateEngine();

@@ -168,8 +168,10 @@ public sealed class GameEngine
 
         var playerBeforeSettle = state.PlayerTank.Position.Y;
         var cpuBeforeSettle = state.CpuTank.Position.Y;
-        SettleTank(state.PlayerTank, state.Terrain);
-        SettleTank(state.CpuTank, state.Terrain);
+        var playerBuriedByDirt = IsCoveredByDirt(state.PlayerTank, state.Terrain, resolvedExplosions);
+        var cpuBuriedByDirt = IsCoveredByDirt(state.CpuTank, state.Terrain, resolvedExplosions);
+        SettleTank(state.PlayerTank, state.Terrain, playerBuriedByDirt);
+        SettleTank(state.CpuTank, state.Terrain, cpuBuriedByDirt);
         ApplyFallDamage(state.PlayerTank, state.PlayerTank.Position.Y - playerBeforeSettle);
         ApplyFallDamage(state.CpuTank, state.CpuTank.Position.Y - cpuBeforeSettle);
 
@@ -481,10 +483,18 @@ public sealed class GameEngine
         tank.TurretAngle = tank.IsCpu ? 138 : 42;
     }
 
-    private static void SettleTank(Tank tank, TerrainMask terrain)
+    private static void SettleTank(Tank tank, TerrainMask terrain, bool preserveBuriedPosition = false)
     {
         if (terrain.TryGetNearestVisibleSurface(tank.Position.X, out var surface))
         {
+            if (preserveBuriedPosition && surface.Y < tank.Position.Y)
+            {
+                tank.Position = new Vector2(
+                    Math.Clamp(tank.Position.X, GameConstants.TankWidth / 2f, terrain.Width - (GameConstants.TankWidth / 2f)),
+                    tank.Position.Y);
+                return;
+            }
+
             tank.Position = surface;
             return;
         }
@@ -493,6 +503,17 @@ public sealed class GameEngine
         tank.Position = new Vector2(
             Math.Clamp(tank.Position.X, GameConstants.TankWidth / 2f, terrain.Width - (GameConstants.TankWidth / 2f)),
             terrain.Height - 1);
+    }
+
+    private static bool IsCoveredByDirt(Tank tank, TerrainMask terrain, IReadOnlyList<ExplosionResult> explosions)
+    {
+        if (!explosions.Any(static explosion => explosion.DirtAdded))
+        {
+            return false;
+        }
+
+        var surfaceY = terrain.GetSurfaceY(tank.Position.X);
+        return surfaceY < tank.Position.Y - 4f;
     }
 
     private static void ApplyFallDamage(Tank tank, float fallDistance)
