@@ -101,6 +101,12 @@ function drawCommand(command) {
             if (command.fill) ctx.fill();
             if (command.stroke) ctx.stroke();
             break;
+        case "ellipse":
+            ctx.beginPath();
+            ctx.ellipse(command.x, command.y, command.w, command.h, 0, 0, Math.PI * 2);
+            if (command.fill) ctx.fill();
+            if (command.stroke) ctx.stroke();
+            break;
         case "poly":
             drawPoints(command.points, true);
             if (command.fill) ctx.fill();

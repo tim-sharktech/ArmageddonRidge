@@ -14,7 +14,11 @@ public sealed record RenderScene(
     RenderPreviewTrail PreviewTrail,
     RenderRadiationZone[] Radiation,
     RenderTank Player,
-    RenderTank Cpu);
+    RenderTank Cpu,
+    bool PlayerHurt = false,
+    bool CpuHurt = false,
+    bool PlayerShieldHit = false,
+    bool CpuShieldHit = false);
 
 public sealed record RenderWorld(int Width, int Height);
 

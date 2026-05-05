@@ -53,17 +53,22 @@ public static class GameConstants
     /// <summary>
     /// Horizontal radius for the visible shield bubble collision envelope.
     /// </summary>
-    public const float ShieldCollisionRadiusX = 52f;
+    public const float ShieldCollisionRadiusX = 76f;
 
     /// <summary>
     /// Vertical radius for the visible shield bubble collision envelope.
     /// </summary>
-    public const float ShieldCollisionRadiusY = 42f;
+    public const float ShieldCollisionRadiusY = 58f;
 
     /// <summary>
     /// Vertical offset from tank foot position to the center of the shield bubble.
     /// </summary>
-    public const float ShieldCollisionCenterYOffset = 30f;
+    public const float ShieldCollisionCenterYOffset = 62f;
+
+    /// <summary>
+    /// Fraction of otherwise blockable shield damage that still bruises hull health.
+    /// </summary>
+    public const float ShieldHealthBleedThroughPercent = 0.18f;
 
     /// <summary>
     /// Fixed simulation timestep in seconds.

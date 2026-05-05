@@ -96,7 +96,15 @@ public partial class Home
         $"floating-command{(_battlePanelCollapsed ? " is-expanded" : " is-compact")}{(_battlePanelDragging ? " is-dragging" : "")}";
 
     private string BattlePanelStyle =>
-        FormattableString.Invariant($"--battle-panel-dx:{_battlePanelOffsetX:0.###}px;--battle-panel-dy:{_battlePanelOffsetY:0.###}px;");
+        FormattableString.Invariant($"--battle-panel-left:{BattlePanelBaseLeftPercent:0.###}%;--battle-panel-top:{BattlePanelBaseTopPercent:0.###}%;--battle-panel-dx:{_battlePanelOffsetX:0.###}px;--battle-panel-dy:{_battlePanelOffsetY:0.###}px;");
+
+    private double BattlePanelBaseLeftPercent => _state is null
+        ? 68
+        : _state.CpuTank.Position.X >= GameConstants.WorldWidth * 0.5f ? 30 : 70;
+
+    private double BattlePanelBaseTopPercent => _state is null
+        ? 44
+        : _state.CpuTank.Position.Y >= GameConstants.WorldHeight * 0.55f ? 36 : 66;
 
     private string BattleLayoutCss => _state?.Phase == GamePhase.Battle
         ? (_battlePanelCollapsed ? "is-battle panel-collapsed" : "is-battle")
@@ -111,7 +119,7 @@ public partial class Home
         get
         {
             var angle = _state?.PlayerTank.TurretAngle ?? 45f;
-            return (((angle - 5f) / 80f) * 140f) - 70f;
+            return -Math.Clamp(angle, 5f, 85f);
         }
     }
 
@@ -256,16 +264,20 @@ public partial class Home
     private async Task PlayResolutionAsync(RenderScene preShotScene, ShotResolution resolution, bool shieldHit, bool healthHit)
     {
         _shotPlaybackInProgress = true;
+        Task? impactAudioTask = null;
         try
         {
             var hasNuclear = HasNuclearExplosion(resolution.Explosions);
             await Audio.PlayAsync(hasNuclear ? "nuclear" : "fire");
+            impactAudioTask = PlayImpactAudioDuringPlaybackAsync(resolution, shieldHit, healthHit, hasNuclear);
             await Renderer.PlayShotAsync(preShotScene, resolution, _screenShake && !_reducedMotion);
-            if (shieldHit) await Audio.PlayAsync("shieldHit");
-            if (!shieldHit || healthHit) await Audio.PlayAsync(hasNuclear || HasLargeExplosion(resolution.Explosions) ? "largeExplosion" : "smallExplosion");
+            await impactAudioTask;
         }
         catch (JSException ex)
         {
+            if (impactAudioTask is not null)
+                await AwaitQuietlyAsync(impactAudioTask);
+
             _state?.EventLog.Add($"Recovered from renderer playback error: {ex.Message}");
         }
         finally
@@ -276,6 +288,47 @@ public partial class Home
         if (resolution.Performance.TerrainColumnsTouched > 0) MarkTerrainChanged();
 
         await RenderSceneCoreAsync(force: true);
+    }
+
+    private static async Task AwaitQuietlyAsync(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task PlayImpactAudioDuringPlaybackAsync(ShotResolution resolution, bool shieldHit, bool healthHit, bool hasNuclear)
+    {
+        var delay = EstimateImpactAudioDelayMs(resolution);
+        if (delay > 0) await Task.Delay(delay);
+
+        if (shieldHit) await Audio.PlayAsync("shieldHit");
+        if (!shieldHit || healthHit)
+            await Audio.PlayAsync(hasNuclear || HasLargeExplosion(resolution.Explosions) ? "largeExplosion" : "smallExplosion");
+    }
+
+    private int EstimateImpactAudioDelayMs(ShotResolution resolution)
+    {
+        if (_reducedMotion) return 120;
+
+        var trailCount = Math.Max(2, resolution.Trail.Count);
+        var visualDuration = resolution.WeaponId switch
+        {
+            WeaponIds.DarkEagle => 2900,
+            WeaponIds.ShahedDroneSwarm => Math.Min(3400, Math.Max(1500, trailCount * 13)),
+            WeaponIds.SplitterMirv => Math.Min(1800, Math.Max(900, (int)MathF.Round(trailCount * 5.5f))),
+            WeaponIds.Gbu57Mop => Math.Min(2100, Math.Max(900, (int)MathF.Round(trailCount * 8.5f))),
+            _ => Math.Min(1200, Math.Max(260, trailCount * 4))
+        };
+
+        if (resolution.Intercepted)
+            visualDuration = Math.Clamp(visualDuration, 2900, 3400);
+
+        return Math.Clamp((int)MathF.Round(visualDuration * 0.86f), 120, 3000);
     }
 
     private async Task BuyWeaponAsync(string weaponId)
@@ -348,7 +401,11 @@ public partial class Home
             PreviewTrailDto(),
             RadiationDto(_state.RadiationZones),
             TankDto(_state.PlayerTank, _state.Terrain),
-            TankDto(_state.CpuTank, _state.Terrain));
+            TankDto(_state.CpuTank, _state.Terrain),
+            _playerHurt,
+            _cpuHurt,
+            _playerShieldHit,
+            _cpuShieldHit);
     }
 
     private void ResetRenderCache()

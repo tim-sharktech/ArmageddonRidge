@@ -95,9 +95,13 @@ public sealed class ExplosionService
 
         var bypass = damage * weapon.ShieldBypassPercent;
         var blockable = damage - bypass;
-        var absorbed = MathF.Min(tank.Shield, blockable);
+        var shieldBleedThrough = tank.Shield > 0
+            ? blockable * GameConstants.ShieldHealthBleedThroughPercent
+            : 0;
+        var absorbable = blockable - shieldBleedThrough;
+        var absorbed = MathF.Min(tank.Shield, absorbable);
         tank.Shield -= absorbed;
-        var healthDamage = bypass + (blockable - absorbed);
+        var healthDamage = bypass + shieldBleedThrough + (absorbable - absorbed);
         tank.Health -= (int)MathF.Ceiling(healthDamage);
         return damage;
     }

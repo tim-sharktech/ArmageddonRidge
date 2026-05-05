@@ -614,8 +614,8 @@ select {
 
 .floating-command {
     position: absolute;
-    top: clamp(116px, 44%, calc(100% - 116px));
-    left: clamp(118px, 68%, calc(100% - 132px));
+    top: clamp(116px, var(--battle-panel-top, 44%), calc(100% - 116px));
+    left: clamp(118px, var(--battle-panel-left, 68%), calc(100% - 132px));
     z-index: 4;
     border: 1px solid rgba(255, 255, 255, 0.22);
     border-radius: 8px;

@@ -45,7 +45,7 @@ public static class PatriotDefense
     }
 
     /// <summary>
-    /// Chooses the nearest point on the incoming trail for the defensive intercept effect.
+    /// Chooses the projectile apex for the defensive intercept effect.
     /// </summary>
     public static Vector2 InterceptPoint(Tank protectedTank, IReadOnlyList<Vector2> trail)
     {
@@ -53,14 +53,11 @@ public static class PatriotDefense
             return protectedTank.Center + new Vector2(0, -70);
 
         var best = trail[0];
-        var bestDistance = Vector2.DistanceSquared(best, protectedTank.Center);
         for (var i = 1; i < trail.Count; i++)
         {
-            var distance = Vector2.DistanceSquared(trail[i], protectedTank.Center);
-            if (distance < bestDistance)
+            if (trail[i].Y < best.Y)
             {
                 best = trail[i];
-                bestDistance = distance;
             }
         }
 

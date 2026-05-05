@@ -509,6 +509,8 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
     {
         unchecked
         {
+            // Visual submunitions need deterministic variation without consuming the
+            // match RNG that controls terrain, wind, CPU planning, and progression.
             var hash = state.RandomSeed;
             hash = (hash * 397) ^ state.RoundNumber;
             hash = (hash * 397) ^ state.ShotsFired;

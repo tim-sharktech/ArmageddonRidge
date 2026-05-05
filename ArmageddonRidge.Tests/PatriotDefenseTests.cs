@@ -51,17 +51,18 @@ public sealed class PatriotDefenseTests
     }
 
     [Fact]
-    public void PatriotDefenseChoosesClosestTrailPointAsInterceptPoint()
+    public void PatriotDefenseChoosesTrailApexAsInterceptPoint()
     {
         var tank = Tank("player", 300, 500);
         var trail = new[]
         {
             new Vector2(100, 300),
             new Vector2(260, 430),
+            new Vector2(470, 240),
             new Vector2(900, 300)
         };
 
-        Assert.Equal(trail[1], PatriotDefense.InterceptPoint(tank, trail));
+        Assert.Equal(trail[2], PatriotDefense.InterceptPoint(tank, trail));
     }
 
     private static Tank Tank(string id, float x, float y) => new()

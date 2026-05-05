@@ -92,7 +92,7 @@ public sealed class ProjectileSimulatorTests
         var result = simulator.Simulate(terrain, player, cpu, weapon, 0, 100, 0, maxSteps: 60);
 
         Assert.Equal(ProjectileStopReason.ShieldHit, result.StopReason);
-        Assert.InRange(result.ImpactPoint.X, 235, cpu.Position.X - (GameConstants.TankCollisionWidth / 2f));
+        Assert.InRange(result.ImpactPoint.X, 215, cpu.Position.X - (GameConstants.TankCollisionWidth / 2f));
     }
 
     [Fact]
