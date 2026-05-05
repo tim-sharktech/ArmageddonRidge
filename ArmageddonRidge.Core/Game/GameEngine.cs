@@ -274,7 +274,7 @@ public sealed class GameEngine
 
     private static WeaponSimulation SimulateGuidedDarkEagle(Tank owner, Tank opponent, WeaponDefinition weapon)
     {
-        var origin = owner.Center;
+        var origin = GuidedLaunchPoint(owner);
         var target = opponent.Center;
         var distance = Vector2.Distance(origin, target);
         var apexY = Math.Clamp(Math.Min(origin.Y, target.Y) - Math.Clamp(distance * 0.22f, 130f, 230f), 48f, GameConstants.WorldHeight - 1);
@@ -390,6 +390,12 @@ public sealed class GameEngine
     private static Vector2 ClampToWorld(Vector2 point) => new(
         Math.Clamp(point.X, 0, GameConstants.WorldWidth - 1),
         Math.Clamp(point.Y, 0, GameConstants.WorldHeight - 1));
+
+    private static Vector2 GuidedLaunchPoint(Tank tank)
+    {
+        var radians = tank.TurretAngle * (MathF.PI / 180f);
+        return ClampToWorld(tank.Center + new Vector2(MathF.Cos(radians) * 32f, -MathF.Sin(radians) * 32f));
+    }
 
     private static Tank CreateTank(string id, string name, bool isCpu, float x, TerrainMask terrain, float angle)
     {

@@ -294,32 +294,37 @@
         }
 
         _canFire = false;
-        await Audio.UnlockAsync();
-        var playerHealthBefore = _state.PlayerTank.Health;
-        var cpuHealthBefore = _state.CpuTank.Health;
-        var playerPreShotScene = BuildScene();
-        var playerShot = Engine.FireCurrentTurn(_state, _settings, _state.PlayerTank.TurretAngle, _power);
-        await PlayResolutionAsync(playerPreShotScene, playerShot);
-        await ApplyDamageFeedbackAsync(playerHealthBefore, cpuHealthBefore);
-
-        if (_state.Phase == GamePhase.Battle && _state.CurrentTurn == TurnOwner.Cpu)
+        try
         {
-            await Task.Delay(_reducedMotion ? 250 : 700);
-            playerHealthBefore = _state.PlayerTank.Health;
-            cpuHealthBefore = _state.CpuTank.Health;
-            var cpuPreShotScene = BuildScene();
-            var cpuShot = Engine.FireCurrentTurn(_state, _settings);
-            await PlayResolutionAsync(cpuPreShotScene, cpuShot);
+            await Audio.UnlockAsync();
+            var playerHealthBefore = _state.PlayerTank.Health;
+            var cpuHealthBefore = _state.CpuTank.Health;
+            var playerPreShotScene = BuildScene();
+            var playerShot = Engine.FireCurrentTurn(_state, _settings, _state.PlayerTank.TurretAngle, _power);
+            await PlayResolutionAsync(playerPreShotScene, playerShot);
             await ApplyDamageFeedbackAsync(playerHealthBefore, cpuHealthBefore);
-        }
 
-        _canFire = true;
-        if (_state.Phase == GamePhase.RoundOver)
+            if (_state.Phase == GamePhase.Battle && _state.CurrentTurn == TurnOwner.Cpu)
+            {
+                await Task.Delay(_reducedMotion ? 250 : 700);
+                playerHealthBefore = _state.PlayerTank.Health;
+                cpuHealthBefore = _state.CpuTank.Health;
+                var cpuPreShotScene = BuildScene();
+                var cpuShot = Engine.FireCurrentTurn(_state, _settings);
+                await PlayResolutionAsync(cpuPreShotScene, cpuShot);
+                await ApplyDamageFeedbackAsync(playerHealthBefore, cpuHealthBefore);
+            }
+
+            if (_state.Phase == GamePhase.RoundOver)
+            {
+                await PersistSaveAsync();
+            }
+        }
+        finally
         {
-            await PersistSaveAsync();
+            _canFire = true;
+            StateHasChanged();
         }
-
-        StateHasChanged();
     }
 
     private async Task PlayResolutionAsync(object preShotScene, ShotResolution resolution)
@@ -330,6 +335,10 @@
             await Audio.PlayAsync(resolution.Explosions.Any(static e => e.Nuclear) ? "nuclear" : "fire");
             await Renderer.PlayShotAsync(preShotScene, resolution, _screenShake && !_reducedMotion);
             await Audio.PlayAsync(resolution.Explosions.Any(static e => e.Nuclear || e.DamageRadius > 80) ? "largeExplosion" : "smallExplosion");
+        }
+        catch (Microsoft.JSInterop.JSException ex)
+        {
+            _state?.EventLog.Add($"Recovered from renderer playback error: {ex.Message}");
         }
         finally
         {

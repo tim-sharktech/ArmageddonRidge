@@ -61,51 +61,64 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId) 
     const stagedExplosions = (explosions ?? []).filter(explosion => Number(explosion.triggerIndex ?? -1) >= 0);
     const finalExplosions = (explosions ?? []).filter(explosion => Number(explosion.triggerIndex ?? -1) < 0);
     const stagedStarts = new Map();
-    const droneFlight = isDroneWeapon(weaponId);
-    const darkEagleFlight = isDarkEagleWeapon(weaponId);
-    const dramaticFlight = droneFlight || isMopWeapon(weaponId);
-    const duration = darkEagleFlight
-        ? 2300
-        : droneFlight
-        ? Math.min(3400, Math.max(1500, points.length * 13))
-        : Math.min(dramaticFlight ? 1600 : 1200, Math.max(dramaticFlight ? 620 : 260, points.length * (dramaticFlight ? 5.5 : 4)));
+    const duration = shotDuration(points.length, weaponId);
     const started = performance.now();
 
     return new Promise(resolve => {
-        const finish = () => {
-            if (!finalExplosions.length) {
-                setTimeout(() => {
-                    shotInProgress = false;
-                    resolve();
-                }, 120);
+        let completed = false;
+        const complete = () => {
+            if (completed) {
                 return;
             }
 
-            animateExplosions(scene, finalExplosions, screenShake).then(() => {
-                shotInProgress = false;
-                resolve();
-            });
+            completed = true;
+            shotInProgress = false;
+            resolve();
+        };
+
+        const fail = error => {
+            console.error("Shot playback failed", error);
+            complete();
+        };
+
+        const finish = () => {
+            if (!finalExplosions.length) {
+                setTimeout(complete, 120);
+                return;
+            }
+
+            animateExplosions(scene, finalExplosions, screenShake)
+                .then(complete)
+                .catch(fail);
         };
 
         const tick = now => {
-            const t = Math.min(1, (now - started) / duration);
-            const pathProgress = darkEagleFlight ? darkEagleFlightProgress(t) : t;
-            const count = Math.max(1, Math.floor(points.length * pathProgress));
-            const shake = screenShake && explosions?.some(e => e.nuclear || e.radius > 80) ? Math.sin(now * 0.08) * (1 - t) * 8 : 0;
-            drawScene(shotScene, shake, -shake * 0.4);
-            drawTrail(points, count, weaponId);
-            drawTriggeredExplosions(stagedExplosions, count, now, stagedStarts);
-            if (t < 1) {
-                requestAnimationFrame(tick);
-                return;
-            }
+            try {
+                const t = Math.min(1, (now - started) / duration);
+                const pathProgress = shotPathProgress(t, weaponId);
+                const count = Math.max(1, Math.floor(points.length * pathProgress));
+                const shake = screenShake && explosions?.some(e => e.nuclear || e.radius > 80) ? Math.sin(now * 0.08) * (1 - t) * 8 : 0;
+                drawScene(shotScene, shake, -shake * 0.4);
+                drawTrail(points, count, weaponId);
+                drawTriggeredExplosions(stagedExplosions, count, now, stagedStarts);
+                if (t < 1) {
+                    requestAnimationFrame(tick);
+                    return;
+                }
 
-            requestAnimationFrame(() => {
-                drawScene(shotScene, 0, 0);
-                drawTrail(points, points.length, weaponId);
-                drawTriggeredExplosions(stagedExplosions, points.length, performance.now(), stagedStarts);
-                finish();
-            });
+                requestAnimationFrame(() => {
+                    try {
+                        drawScene(shotScene, 0, 0);
+                        drawTrail(points, points.length, weaponId);
+                        drawTriggeredExplosions(stagedExplosions, points.length, performance.now(), stagedStarts);
+                        finish();
+                    } catch (error) {
+                        fail(error);
+                    }
+                });
+            } catch (error) {
+                fail(error);
+            }
         };
 
         requestAnimationFrame(tick);
@@ -988,6 +1001,27 @@ function isDroneWeapon(weaponId) {
 
 function isDarkEagleWeapon(weaponId) {
     return String(weaponId ?? "").toLowerCase().includes("dark-eagle");
+}
+
+function shotDuration(pointCount, weaponId) {
+    if (isDarkEagleWeapon(weaponId)) {
+        return 2300;
+    }
+
+    if (isDroneWeapon(weaponId)) {
+        return Math.min(3400, Math.max(1500, pointCount * 13));
+    }
+
+    const dramatic = isMopWeapon(weaponId);
+    return Math.min(
+        dramatic ? 1600 : 1200,
+        Math.max(dramatic ? 620 : 260, pointCount * (dramatic ? 5.5 : 4)));
+}
+
+function shotPathProgress(t, weaponId) {
+    return isDarkEagleWeapon(weaponId)
+        ? darkEagleFlightProgress(t)
+        : t;
 }
 
 function darkEagleFlightProgress(t) {
