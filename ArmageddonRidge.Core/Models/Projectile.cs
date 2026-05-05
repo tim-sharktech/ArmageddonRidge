@@ -1,21 +1,11 @@
-using ArmageddonRidge.Core.Geometry;
+using System.Numerics;
 
 namespace ArmageddonRidge.Core.Models;
 
-public sealed record Projectile(
-    Vec2 Position,
-    Vec2 Velocity,
-    float GravityScale,
-    float WindScale,
-    float CollisionRadius,
-    string WeaponId,
-    string OwnerTankId,
-    float Age = 0);
-
-public sealed record RadiationZone(Vec2 Center, float Radius, int TurnsRemaining, float DamagePerTurn);
+public sealed record RadiationZone(Vector2 Center, float Radius, int TurnsRemaining, float DamagePerTurn);
 
 public sealed record ExplosionResult(
-    Vec2 Center,
+    Vector2 Center,
     float DamageRadius,
     float TerrainRadius,
     float PlayerDamage,
@@ -27,7 +17,7 @@ public sealed record ExplosionResult(
 public sealed record ShotResolution(
     string WeaponId,
     string OwnerTankId,
-    IReadOnlyList<Vec2> Trail,
+    IReadOnlyList<Vector2> Trail,
     IReadOnlyList<ExplosionResult> Explosions,
     IReadOnlyList<string> Events,
     bool RoundEnded,

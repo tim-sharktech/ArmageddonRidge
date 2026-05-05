@@ -1,4 +1,4 @@
-using ArmageddonRidge.Core.Geometry;
+using System.Numerics;
 
 namespace ArmageddonRidge.Core.Terrain;
 
@@ -43,7 +43,7 @@ public sealed class TerrainMask
         return _solidTop[ix];
     }
 
-    public bool TryGetNearestVisibleSurface(float preferredX, out Vec2 surface)
+    public bool TryGetNearestVisibleSurface(float preferredX, out Vector2 surface)
     {
         var preferredIndex = Math.Clamp((int)MathF.Round(preferredX), 0, Width - 1);
         for (var offset = 0; offset < Width; offset++)
@@ -51,14 +51,14 @@ public sealed class TerrainMask
             var left = preferredIndex - offset;
             if (IsVisibleSurfaceColumn(left))
             {
-                surface = new Vec2(left, _solidTop[left]);
+                surface = new Vector2(left, _solidTop[left]);
                 return true;
             }
 
             var right = preferredIndex + offset;
             if (right != left && IsVisibleSurfaceColumn(right))
             {
-                surface = new Vec2(right, _solidTop[right]);
+                surface = new Vector2(right, _solidTop[right]);
                 return true;
             }
         }
@@ -67,19 +67,21 @@ public sealed class TerrainMask
         return false;
     }
 
-    public bool IsSolid(Vec2 point)
+    public bool IsSolid(Vector2 point) => IsSolid(point.X, point.Y);
+
+    public bool IsSolid(float x, float y)
     {
-        if (point.X < 0 || point.X >= Width || point.Y < 0 || point.Y >= Height)
+        if (x < 0 || x >= Width || y < 0 || y >= Height)
         {
             return false;
         }
 
-        return point.Y >= _solidTop[(int)point.X];
+        return y >= _solidTop[(int)x];
     }
 
     private bool IsVisibleSurfaceColumn(int x) => x >= 0 && x < Width && _solidTop[x] < Height;
 
-    public int RemoveCircle(Vec2 center, float radius)
+    public int RemoveCircle(Vector2 center, float radius)
     {
         var touched = 0;
         var minX = Math.Max(0, (int)MathF.Floor(center.X - radius));
@@ -106,7 +108,7 @@ public sealed class TerrainMask
         return touched;
     }
 
-    public int AddCircle(Vec2 center, float radius)
+    public int AddCircle(Vector2 center, float radius)
     {
         var touched = 0;
         var minX = Math.Max(0, (int)MathF.Floor(center.X - radius));

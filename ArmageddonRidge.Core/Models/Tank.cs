@@ -1,4 +1,4 @@
-using ArmageddonRidge.Core.Geometry;
+using System.Numerics;
 
 namespace ArmageddonRidge.Core.Models;
 
@@ -6,7 +6,7 @@ public sealed class Tank
 {
     public required string Id { get; init; }
     public required string Name { get; init; }
-    public Vec2 Position { get; set; }
+    public Vector2 Position { get; set; }
     public float TurretAngle { get; set; }
     public int Health { get; set; } = GameConstants.StartingHealth;
     public int MaxHealth { get; set; } = GameConstants.StartingHealth;
@@ -17,7 +17,7 @@ public sealed class Tank
     public Dictionary<string, int> Inventory { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<UpgradeType> Upgrades { get; } = [];
 
-    public Vec2 Center => new(Position.X, Position.Y - (GameConstants.TankHeight / 2f));
+    public Vector2 Center => new(Position.X, Position.Y - (GameConstants.TankHeight / 2f));
 
     public bool IsDestroyed => Health <= 0;
 

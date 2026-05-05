@@ -1,4 +1,4 @@
-using ArmageddonRidge.Core.Geometry;
+using System.Numerics;
 using ArmageddonRidge.Core.Terrain;
 
 namespace ArmageddonRidge.Tests;
@@ -22,9 +22,9 @@ public sealed class TerrainTests
         var x = 500;
         var before = terrain.GetSurfaceY(x);
 
-        terrain.RemoveCircle(new Vec2(x, before - 8), 54);
+        terrain.RemoveCircle(new Vector2(x, before - 8), 54);
         var crater = terrain.GetSurfaceY(x);
-        terrain.AddCircle(new Vec2(x, crater - 10), 42);
+        terrain.AddCircle(new Vector2(x, crater - 10), 42);
         var dirt = terrain.GetSurfaceY(x);
 
         Assert.True(crater > before);

@@ -1,7 +1,7 @@
+using System.Numerics;
 using ArmageddonRidge.Core;
 using ArmageddonRidge.Core.Content;
 using ArmageddonRidge.Core.Game;
-using ArmageddonRidge.Core.Geometry;
 using ArmageddonRidge.Core.Models;
 using ArmageddonRidge.Core.Terrain;
 
@@ -95,14 +95,14 @@ public sealed class GameEngineTests
         heights[180] = 500;
         heights[1000] = 510;
         state.Terrain.CopyFrom(new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights));
-        state.PlayerTank.Position = new Vec2(160, GameConstants.WorldHeight);
-        state.CpuTank.Position = new Vec2(1020, GameConstants.WorldHeight);
+        state.PlayerTank.Position = new Vector2(160, GameConstants.WorldHeight);
+        state.CpuTank.Position = new Vector2(1020, GameConstants.WorldHeight);
         engine.StartBattle(state);
 
         engine.FireCurrentTurn(state, settings, angle: 5, power: 1);
 
-        Assert.Equal(new Vec2(140, 500), state.PlayerTank.Position);
-        Assert.Equal(new Vec2(1000, 510), state.CpuTank.Position);
+        Assert.Equal(new Vector2(140, 500), state.PlayerTank.Position);
+        Assert.Equal(new Vector2(1000, 510), state.CpuTank.Position);
         Assert.False(state.PlayerTank.IsDestroyed);
         Assert.False(state.CpuTank.IsDestroyed);
     }

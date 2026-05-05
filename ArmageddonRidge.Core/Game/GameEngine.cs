@@ -1,7 +1,7 @@
 using System.Diagnostics;
+using System.Numerics;
 using ArmageddonRidge.Core.AI;
 using ArmageddonRidge.Core.Content;
-using ArmageddonRidge.Core.Geometry;
 using ArmageddonRidge.Core.Models;
 using ArmageddonRidge.Core.Physics;
 using ArmageddonRidge.Core.Terrain;
@@ -187,25 +187,29 @@ public sealed class GameEngine
         {
             var x = owner.IsCpu ? GameConstants.WorldWidth - 260 : 260;
             x += state.Random.Next(-80, 81);
-            owner.Position = new Vec2(x, state.Terrain.GetSurfaceY(x));
+            owner.Position = new Vector2(x, state.Terrain.GetSurfaceY(x));
             return new WeaponSimulation([owner.Center], owner.Center, []);
         }
 
         if (weapon.BehaviorType == WeaponBehaviorType.Laser)
         {
             var radians = angle * MathF.PI / 180f;
-            var trail = new List<Vec2>();
+            var stepX = MathF.Cos(radians) * 7f;
+            var stepY = -MathF.Sin(radians) * 7f;
+            var trail = new List<Vector2>();
             var origin = owner.Center;
+            var opponentCenter = opponent.Center;
+            var hitRadiusSquared = GameConstants.TankWidth * GameConstants.TankWidth;
             for (var i = 0; i < 180; i++)
             {
-                var p = origin + new Vec2(MathF.Cos(radians) * i * 7f, -MathF.Sin(radians) * i * 7f);
+                var p = origin + new Vector2(stepX * i, stepY * i);
                 trail.Add(p);
                 if (state.Terrain.IsSolid(p))
                 {
                     return new WeaponSimulation(trail, p, [new ExplosionResult(p, weapon.BlastRadius, weapon.TerrainRadius, 0, 0, false, false, [])]);
                 }
 
-                if (Vec2.Distance(p, opponent.Center) < GameConstants.TankWidth)
+                if (Vector2.DistanceSquared(p, opponentCenter) < hitRadiusSquared)
                 {
                     return new WeaponSimulation(trail, p, [new ExplosionResult(p, weapon.BlastRadius, weapon.TerrainRadius, 0, 0, false, false, [])]);
                 }
@@ -225,7 +229,7 @@ public sealed class GameEngine
         for (var i = 0; i < count; i++)
         {
             var offset = (i - ((count - 1) / 2f)) * 20f;
-            var center = primary.ImpactPoint + new Vec2(offset, -MathF.Abs(offset) * 0.25f);
+            var center = primary.ImpactPoint + new Vector2(offset, -MathF.Abs(offset) * 0.25f);
             explosions.Add(new ExplosionResult(center, weapon.BlastRadius, weapon.TerrainRadius, 0, 0, false, false, []));
         }
 
@@ -258,7 +262,7 @@ public sealed class GameEngine
             Name = name,
             IsCpu = isCpu,
             TurretAngle = angle,
-            Position = new Vec2(x, terrain.GetSurfaceY(x))
+            Position = new Vector2(x, terrain.GetSurfaceY(x))
         };
         tank.AddWeapon(WeaponIds.PeaShell, -1);
         return tank;
@@ -266,7 +270,7 @@ public sealed class GameEngine
 
     private static void PlaceTank(Tank tank, TerrainMask terrain, float preferredX)
     {
-        tank.Position = new Vec2(preferredX, terrain.GetSurfaceY(preferredX));
+        tank.Position = new Vector2(preferredX, terrain.GetSurfaceY(preferredX));
         tank.TurretAngle = tank.IsCpu ? 138 : 42;
     }
 
@@ -279,7 +283,7 @@ public sealed class GameEngine
         }
 
         tank.Health = 0;
-        tank.Position = new Vec2(
+        tank.Position = new Vector2(
             Math.Clamp(tank.Position.X, GameConstants.TankWidth / 2f, terrain.Width - (GameConstants.TankWidth / 2f)),
             terrain.Height - 1);
     }
@@ -370,4 +374,4 @@ public sealed class GameEngine
     }
 }
 
-internal sealed record WeaponSimulation(IReadOnlyList<Vec2> Trail, Vec2 ImpactPoint, IReadOnlyList<ExplosionResult> Explosions);
+internal sealed record WeaponSimulation(IReadOnlyList<Vector2> Trail, Vector2 ImpactPoint, IReadOnlyList<ExplosionResult> Explosions);

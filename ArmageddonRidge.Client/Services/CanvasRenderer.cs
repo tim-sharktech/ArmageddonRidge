@@ -1,4 +1,4 @@
-using ArmageddonRidge.Core.Geometry;
+using System.Numerics;
 using ArmageddonRidge.Core.Models;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
@@ -31,7 +31,7 @@ public sealed class CanvasRenderer : IAsyncDisposable
         return await _module.InvokeAsync<RenderStats>("render", scene);
     }
 
-    public async ValueTask PlayShotAsync(object scene, IReadOnlyList<Vec2> trail, IReadOnlyList<ExplosionResult> explosions, bool screenShake)
+    public async ValueTask PlayShotAsync(object scene, IReadOnlyList<Vector2> trail, IReadOnlyList<ExplosionResult> explosions, bool screenShake)
     {
         if (_module is null)
         {

@@ -176,6 +176,8 @@
     private int _bestScore;
     private bool _rendererReady;
     private bool _shotPlaybackInProgress;
+    private int _terrainRevision;
+    private int _lastSentTerrainRevision = -1;
     private CancellationTokenSource? _perfLoop;
 
     private string WindText => _state is null
@@ -220,6 +222,7 @@
     {
         _settings = new MatchSettings(Difficulty: _difficulty, TerrainSeed: Random.Shared.Next(10_000, 99_999));
         _state = Engine.NewMatch(_settings);
+        ResetRenderCache();
         _taunt = "";
         await Audio.UnlockAsync();
         await Audio.PlayAsync("menu");
@@ -245,6 +248,7 @@
         }
 
         Engine.StartNextRound(_state, _settings);
+        MarkTerrainChanged();
         await RenderSceneAsync();
     }
 
@@ -297,6 +301,11 @@
             _shotPlaybackInProgress = false;
         }
 
+        if (resolution.Performance.TerrainColumnsTouched > 0)
+        {
+            MarkTerrainChanged();
+        }
+
         await RenderSceneCoreAsync(force: true);
     }
 
@@ -326,7 +335,13 @@
         }
 
         await EnsureRendererAsync();
-        var stats = await Renderer.RenderAsync(BuildScene());
+        var includeTerrain = force || _lastSentTerrainRevision != _terrainRevision;
+        var stats = await Renderer.RenderAsync(BuildScene(includeTerrain));
+        if (includeTerrain)
+        {
+            _lastSentTerrainRevision = _terrainRevision;
+        }
+
         ApplyStats(stats);
     }
 
@@ -341,17 +356,18 @@
         _rendererReady = true;
     }
 
-    private object BuildScene()
+    private object BuildScene(bool includeTerrain = true)
     {
         if (_state is null)
         {
             return new { };
         }
 
+        object? terrain = includeTerrain ? _state.Terrain.SolidTop.ToArray() : null;
         return new
         {
             world = new { width = GameConstants.WorldWidth, height = GameConstants.WorldHeight },
-            terrain = _state.Terrain.SolidTop.ToArray(),
+            terrain,
             wind = _state.Wind,
             phase = _state.Phase.ToString(),
             selectedWeapon = _state.SelectedWeaponId,
@@ -360,6 +376,14 @@
             cpu = TankDto(_state.CpuTank)
         };
     }
+
+    private void ResetRenderCache()
+    {
+        _terrainRevision++;
+        _lastSentTerrainRevision = -1;
+    }
+
+    private void MarkTerrainChanged() => _terrainRevision++;
 
     private static object TankDto(Tank tank) => new
     {

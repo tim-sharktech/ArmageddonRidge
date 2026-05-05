@@ -1,4 +1,4 @@
-using ArmageddonRidge.Core.Geometry;
+using System.Numerics;
 using ArmageddonRidge.Core.Models;
 
 namespace ArmageddonRidge.Core.Physics;
@@ -7,7 +7,7 @@ public sealed class ExplosionService
 {
     public ExplosionResult Resolve(
         WeaponDefinition weapon,
-        Vec2 center,
+        Vector2 center,
         Tank owner,
         Tank opponent,
         List<RadiationZone> zones)
@@ -39,7 +39,7 @@ public sealed class ExplosionService
         var total = 0f;
         foreach (var zone in zones)
         {
-            if (Vec2.Distance(tank.Center, zone.Center) <= zone.Radius)
+            if (Vector2.DistanceSquared(tank.Center, zone.Center) <= zone.Radius * zone.Radius)
             {
                 total += zone.DamagePerTurn;
                 tank.Health -= (int)MathF.Ceiling(zone.DamagePerTurn);
@@ -66,14 +66,21 @@ public sealed class ExplosionService
         }
     }
 
-    private static float ApplyDamage(Tank tank, Vec2 center, WeaponDefinition weapon)
+    private static float ApplyDamage(Tank tank, Vector2 center, WeaponDefinition weapon)
     {
         if (weapon.MaxDamage <= 0 || weapon.BlastRadius <= 0)
         {
             return 0;
         }
 
-        var distance = Vec2.Distance(tank.Center, center);
+        var radiusSquared = weapon.BlastRadius * weapon.BlastRadius;
+        var distanceSquared = Vector2.DistanceSquared(tank.Center, center);
+        if (distanceSquared >= radiusSquared)
+        {
+            return 0;
+        }
+
+        var distance = MathF.Sqrt(distanceSquared);
         var normalized = Math.Clamp(1f - (distance / weapon.BlastRadius), 0f, 1f);
         var damage = weapon.MaxDamage * MathF.Pow(normalized, weapon.Falloff);
         if (damage <= 0.01f)

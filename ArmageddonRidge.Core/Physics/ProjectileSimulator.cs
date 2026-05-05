@@ -1,4 +1,4 @@
-using ArmageddonRidge.Core.Geometry;
+using System.Numerics;
 using ArmageddonRidge.Core.Models;
 using ArmageddonRidge.Core.Terrain;
 
@@ -16,79 +16,137 @@ public sealed class ProjectileSimulator
         int wind,
         int maxSteps = 60 * 9)
     {
-        var angleRadians = angleDegrees * MathF.PI / 180f;
-        var muzzle = owner.Center + new Vec2(MathF.Cos(angleRadians) * 23f, -MathF.Sin(angleRadians) * 23f);
-        var speed = Math.Clamp(power, GameConstants.PowerMin, GameConstants.PowerMax) * 4.15f * weapon.ProjectileSpeedMultiplier;
-        var projectile = new Projectile(
-            muzzle,
-            new Vec2(MathF.Cos(angleRadians) * speed, -MathF.Sin(angleRadians) * speed),
-            weapon.GravityInfluence,
-            weapon.WindInfluence,
-            3,
-            weapon.Id,
-            owner.Id);
+        var result = SimulateCore(terrain, owner, opponent, weapon, angleDegrees, power, wind, maxSteps, captureTrail: true);
+        return new ProjectileSimulation(
+            result.Trail ?? [],
+            result.ImpactPoint,
+            result.StopReason,
+            result.NearestOpponentDistance,
+            result.NearestOwnerDistance);
+    }
 
-        var trail = new List<Vec2>(maxSteps / 3);
-        var nearestOpponent = float.MaxValue;
-        var nearestOwner = float.MaxValue;
+    public ProjectilePlanningSimulation SimulateForPlanning(
+        TerrainMask terrain,
+        Tank owner,
+        Tank opponent,
+        WeaponDefinition weapon,
+        float angleDegrees,
+        int power,
+        int wind,
+        int maxSteps = 60 * 9)
+    {
+        var result = SimulateCore(terrain, owner, opponent, weapon, angleDegrees, power, wind, maxSteps, captureTrail: false);
+        return new ProjectilePlanningSimulation(result.ImpactPoint, result.StopReason, result.NearestOpponentDistance, result.NearestOwnerDistance);
+    }
+
+    private static ProjectileSimulationCore SimulateCore(
+        TerrainMask terrain,
+        Tank owner,
+        Tank opponent,
+        WeaponDefinition weapon,
+        float angleDegrees,
+        int power,
+        int wind,
+        int maxSteps,
+        bool captureTrail)
+    {
+        var angleRadians = angleDegrees * MathF.PI / 180f;
+        var cos = MathF.Cos(angleRadians);
+        var sin = MathF.Sin(angleRadians);
+        var ownerCenter = owner.Center;
+        var opponentCenter = opponent.Center;
+        var px = ownerCenter.X + (cos * 23f);
+        var py = ownerCenter.Y - (sin * 23f);
+        var speed = Math.Clamp(power, GameConstants.PowerMin, GameConstants.PowerMax) * 4.15f * weapon.ProjectileSpeedMultiplier;
+        var vx = cos * speed;
+        var vy = -sin * speed;
+        var windAcceleration = wind * weapon.WindInfluence * GameConstants.FixedDeltaTime;
+        var gravityAcceleration = GameConstants.Gravity * weapon.GravityInfluence * GameConstants.FixedDeltaTime;
+
+        var opponentLeft = opponent.Position.X - (GameConstants.TankWidth / 2f);
+        var opponentRight = opponent.Position.X + (GameConstants.TankWidth / 2f);
+        var opponentTop = opponent.Position.Y - GameConstants.TankHeight;
+        var opponentBottom = opponent.Position.Y;
+        var ownerLeft = owner.Position.X - (GameConstants.TankWidth / 2f);
+        var ownerRight = owner.Position.X + (GameConstants.TankWidth / 2f);
+        var ownerTop = owner.Position.Y - GameConstants.TankHeight;
+        var ownerBottom = owner.Position.Y;
+
+        List<Vector2>? trail = captureTrail ? new List<Vector2>(maxSteps / 2) : null;
+        var nearestOpponentSquared = float.MaxValue;
+        var nearestOwnerSquared = float.MaxValue;
 
         for (var step = 0; step < maxSteps; step++)
         {
-            if (step % 2 == 0)
+            if (captureTrail && step % 2 == 0)
             {
-                trail.Add(projectile.Position);
+                trail!.Add(new Vector2(px, py));
             }
 
-            nearestOpponent = MathF.Min(nearestOpponent, Vec2.Distance(projectile.Position, opponent.Center));
-            nearestOwner = MathF.Min(nearestOwner, Vec2.Distance(projectile.Position, owner.Center));
+            nearestOpponentSquared = MathF.Min(nearestOpponentSquared, DistanceSquared(px, py, opponentCenter.X, opponentCenter.Y));
+            nearestOwnerSquared = MathF.Min(nearestOwnerSquared, DistanceSquared(px, py, ownerCenter.X, ownerCenter.Y));
 
-            if (step > 2 && HitsTank(projectile.Position, opponent))
+            if (step > 2 && HitsTank(px, py, opponentLeft, opponentRight, opponentTop, opponentBottom))
             {
-                trail.Add(projectile.Position);
-                return new ProjectileSimulation(trail, projectile.Position, ProjectileStopReason.TankHit, nearestOpponent, nearestOwner);
+                return Finish(trail, captureTrail, px, py, ProjectileStopReason.TankHit, nearestOpponentSquared, nearestOwnerSquared);
             }
 
-            if (step > 8 && HitsTank(projectile.Position, owner))
+            if (step > 8 && HitsTank(px, py, ownerLeft, ownerRight, ownerTop, ownerBottom))
             {
-                trail.Add(projectile.Position);
-                return new ProjectileSimulation(trail, projectile.Position, ProjectileStopReason.OwnerHit, nearestOpponent, nearestOwner);
+                return Finish(trail, captureTrail, px, py, ProjectileStopReason.OwnerHit, nearestOpponentSquared, nearestOwnerSquared);
             }
 
-            if (terrain.IsSolid(projectile.Position))
+            if (terrain.IsSolid(px, py))
             {
-                trail.Add(projectile.Position);
-                return new ProjectileSimulation(trail, projectile.Position, ProjectileStopReason.TerrainHit, nearestOpponent, nearestOwner);
+                return Finish(trail, captureTrail, px, py, ProjectileStopReason.TerrainHit, nearestOpponentSquared, nearestOwnerSquared);
             }
 
-            if (projectile.Position.X < -50 || projectile.Position.X > terrain.Width + 50 || projectile.Position.Y > terrain.Height + 80)
+            if (px < -50 || px > terrain.Width + 50 || py > terrain.Height + 80)
             {
-                trail.Add(projectile.Position);
-                return new ProjectileSimulation(trail, projectile.Position, ProjectileStopReason.OutOfBounds, nearestOpponent, nearestOwner);
+                return Finish(trail, captureTrail, px, py, ProjectileStopReason.OutOfBounds, nearestOpponentSquared, nearestOwnerSquared);
             }
 
-            var velocity = projectile.Velocity;
-            velocity = new Vec2(
-                velocity.X + (wind * weapon.WindInfluence * GameConstants.FixedDeltaTime),
-                velocity.Y + (GameConstants.Gravity * weapon.GravityInfluence * GameConstants.FixedDeltaTime));
-            projectile = projectile with
-            {
-                Velocity = velocity,
-                Position = projectile.Position + (velocity * GameConstants.FixedDeltaTime),
-                Age = projectile.Age + GameConstants.FixedDeltaTime
-            };
+            vx += windAcceleration;
+            vy += gravityAcceleration;
+            px += vx * GameConstants.FixedDeltaTime;
+            py += vy * GameConstants.FixedDeltaTime;
         }
 
-        return new ProjectileSimulation(trail, projectile.Position, ProjectileStopReason.Expired, nearestOpponent, nearestOwner);
+        return Finish(trail, captureTrail, px, py, ProjectileStopReason.Expired, nearestOpponentSquared, nearestOwnerSquared);
     }
 
-    private static bool HitsTank(Vec2 point, Tank tank)
+    private static ProjectileSimulationCore Finish(
+        List<Vector2>? trail,
+        bool captureTrail,
+        float x,
+        float y,
+        ProjectileStopReason stopReason,
+        float nearestOpponentSquared,
+        float nearestOwnerSquared)
     {
-        var left = tank.Position.X - (GameConstants.TankWidth / 2f);
-        var right = tank.Position.X + (GameConstants.TankWidth / 2f);
-        var top = tank.Position.Y - GameConstants.TankHeight;
-        var bottom = tank.Position.Y;
-        return point.X >= left && point.X <= right && point.Y >= top && point.Y <= bottom;
+        var impact = new Vector2(x, y);
+        if (captureTrail)
+        {
+            trail!.Add(impact);
+        }
+
+        return new ProjectileSimulationCore(
+            trail,
+            impact,
+            stopReason,
+            MathF.Sqrt(nearestOpponentSquared),
+            MathF.Sqrt(nearestOwnerSquared));
     }
+
+    private static float DistanceSquared(float ax, float ay, float bx, float by)
+    {
+        var dx = ax - bx;
+        var dy = ay - by;
+        return (dx * dx) + (dy * dy);
+    }
+
+    private static bool HitsTank(float x, float y, float left, float right, float top, float bottom) =>
+        x >= left && x <= right && y >= top && y <= bottom;
 }
 
 public enum ProjectileStopReason
@@ -101,8 +159,21 @@ public enum ProjectileStopReason
 }
 
 public sealed record ProjectileSimulation(
-    IReadOnlyList<Vec2> Trail,
-    Vec2 ImpactPoint,
+    IReadOnlyList<Vector2> Trail,
+    Vector2 ImpactPoint,
+    ProjectileStopReason StopReason,
+    float NearestOpponentDistance,
+    float NearestOwnerDistance);
+
+public readonly record struct ProjectilePlanningSimulation(
+    Vector2 ImpactPoint,
+    ProjectileStopReason StopReason,
+    float NearestOpponentDistance,
+    float NearestOwnerDistance);
+
+internal readonly record struct ProjectileSimulationCore(
+    List<Vector2>? Trail,
+    Vector2 ImpactPoint,
     ProjectileStopReason StopReason,
     float NearestOpponentDistance,
     float NearestOwnerDistance);

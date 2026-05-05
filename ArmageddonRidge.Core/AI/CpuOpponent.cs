@@ -35,7 +35,7 @@ public sealed class CpuOpponent
             {
                 for (var power = 25; power <= 100; power += powerStep)
                 {
-                    var simulation = _simulator.Simulate(state.Terrain, state.CpuTank, state.PlayerTank, weapon, angle, power, state.Wind, 60 * 7);
+                    var simulation = _simulator.SimulateForPlanning(state.Terrain, state.CpuTank, state.PlayerTank, weapon, angle, power, state.Wind, 60 * 7);
                     var enemyPotential = MathF.Max(0, weapon.BlastRadius - simulation.NearestOpponentDistance);
                     var selfRisk = MathF.Max(0, weapon.BlastRadius - simulation.NearestOwnerDistance);
                     var score = (enemyPotential * 10f)

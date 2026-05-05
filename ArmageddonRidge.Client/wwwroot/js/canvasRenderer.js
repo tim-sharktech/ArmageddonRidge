@@ -7,6 +7,7 @@ let fps = 60;
 let frameMs = 16.7;
 let renderMs = 0;
 let lastScene;
+let cachedTerrain;
 let rafId = 0;
 let shotInProgress = false;
 const spriteManifestVersion = "2026-05-04-genesis-v4";
@@ -36,9 +37,10 @@ export function render(scene) {
     }
 
     const started = performance.now();
-    lastScene = scene;
+    const renderScene = prepareScene(scene);
+    lastScene = renderScene;
     sizeCanvas();
-    drawScene(scene, 0, 0);
+    drawScene(renderScene, 0, 0);
     updateStats();
     renderMs = performance.now() - started;
     return getStats();
@@ -50,6 +52,7 @@ export async function playShot(scene, trail, explosions, screenShake) {
         return;
     }
 
+    const shotScene = prepareScene(scene);
     shotInProgress = true;
     const points = Array.from(trail);
     const duration = Math.min(1200, Math.max(260, points.length * 4));
@@ -75,7 +78,7 @@ export async function playShot(scene, trail, explosions, screenShake) {
             const t = Math.min(1, (now - started) / duration);
             const count = Math.max(1, Math.floor(points.length * t));
             const shake = screenShake && explosions?.some(e => e.nuclear || e.radius > 80) ? Math.sin(now * 0.08) * (1 - t) * 8 : 0;
-            drawScene(scene, shake, -shake * 0.4);
+            drawScene(shotScene, shake, -shake * 0.4);
             drawTrail(points.slice(0, count));
             if (t < 1) {
                 requestAnimationFrame(tick);
@@ -83,7 +86,7 @@ export async function playShot(scene, trail, explosions, screenShake) {
             }
 
             requestAnimationFrame(() => {
-                drawScene(scene, 0, 0);
+                drawScene(shotScene, 0, 0);
                 drawTrail(points);
                 finish();
             });
@@ -95,6 +98,15 @@ export async function playShot(scene, trail, explosions, screenShake) {
 
 export function getStats() {
     return { fps: Math.round(fps), frameMs, renderMs };
+}
+
+function prepareScene(scene) {
+    if (scene?.terrain?.length) {
+        cachedTerrain = scene.terrain;
+        return scene;
+    }
+
+    return { ...scene, terrain: cachedTerrain ?? [] };
 }
 
 function drawScene(scene, offsetX, offsetY) {
