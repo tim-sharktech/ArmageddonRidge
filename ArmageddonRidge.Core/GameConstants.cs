@@ -38,12 +38,12 @@ public static class GameConstants
     /// <summary>
     /// Current tank collision width tuned for the sprite art.
     /// </summary>
-    public const int TankCollisionWidth = 74;
+    public const int TankCollisionWidth = 112;
 
     /// <summary>
     /// Current tank collision height tuned for the sprite art.
     /// </summary>
-    public const int TankCollisionHeight = 46;
+    public const int TankCollisionHeight = 68;
 
     /// <summary>
     /// Radius added around swept projectile checks for reliable hits.

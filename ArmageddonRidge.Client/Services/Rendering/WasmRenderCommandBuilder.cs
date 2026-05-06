@@ -148,8 +148,10 @@ public sealed class WasmRenderCommandBuilder
     private static void AddTank(List<RenderCommand> commands, RenderTank tank, string fill, string highlight)
     {
         var baseY = tank.Y - MathF.Min(tank.BuriedDepth, 18);
-        commands.Add(new RenderCommand { Op = "rect", X = tank.X - 32, Y = baseY - 24, W = 64, H = 24, Fill = fill, Stroke = "#121820", LineWidth = 2 });
-        commands.Add(new RenderCommand { Op = "rect", X = tank.X - 18, Y = baseY - 36, W = 36, H = 16, Fill = highlight, Stroke = "#121820", LineWidth = 2 });
+        var hullWidth = GameConstants.TankCollisionWidth;
+        var hullHeight = GameConstants.TankCollisionHeight * 0.5f;
+        commands.Add(new RenderCommand { Op = "rect", X = tank.X - hullWidth / 2f, Y = baseY - hullHeight, W = hullWidth, H = hullHeight, Fill = fill, Stroke = "#121820", LineWidth = 2 });
+        commands.Add(new RenderCommand { Op = "rect", X = tank.X - 26, Y = baseY - 58, W = 52, H = 22, Fill = highlight, Stroke = "#121820", LineWidth = 2 });
 
         var angle = tank.IsCpu ? 180 - tank.Angle : tank.Angle;
         var radians = MathF.PI * angle / 180f;

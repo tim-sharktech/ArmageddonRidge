@@ -258,6 +258,73 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void CpuDirectHullHitsDeductPlayerHealth()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        var heights = Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray();
+        state.Terrain.CopyFrom(new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights));
+        state.PlayerTank.Position = new Vector2(300, 620);
+        state.CpuTank.Position = new Vector2(440, 620);
+        state.Wind = 0;
+        engine.StartBattle(state);
+        state.CurrentTurn = TurnOwner.Cpu;
+
+        engine.FireCurrentTurn(state, settings, angle: 180, power: 100);
+
+        Assert.True(state.PlayerTank.Health < state.PlayerTank.MaxHealth);
+    }
+
+    [Fact]
+    public void HitsNearVisibleHullTopDeductOpponentHealth()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        var heights = Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray();
+        state.Terrain.CopyFrom(new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights));
+        state.PlayerTank.Position = new Vector2(160, 620);
+        state.CpuTank.Position = new Vector2(300, 620);
+        state.Wind = 0;
+        engine.StartBattle(state);
+
+        engine.FireCurrentTurn(state, settings, angle: 14, power: 100);
+
+        Assert.True(state.CpuTank.Health < state.CpuTank.MaxHealth);
+    }
+
+    [Fact]
+    public void RealTerrainHullHitsDeductOpponentHealth()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+
+        for (var angle = 5; angle <= 85; angle++)
+        {
+            for (var power = GameConstants.PowerMin; power <= GameConstants.PowerMax; power++)
+            {
+                var state = engine.NewMatch(settings);
+                engine.StartBattle(state);
+                state.Wind = 0;
+
+                var result = engine.FireCurrentTurn(state, settings, angle, power);
+                if (result.Explosions.Count == 0)
+                    continue;
+
+                var directHit = result.Explosions.Any(static explosion => explosion.CpuDamage > 0);
+                if (!directHit)
+                    continue;
+
+                Assert.True(state.CpuTank.Health < state.CpuTank.MaxHealth);
+                return;
+            }
+        }
+
+        Assert.Fail("Expected one deterministic normal shot to damage the CPU on generated terrain.");
+    }
+
+    [Fact]
     public void DirectShieldHitsBleedSomeDamageThroughToHealth()
     {
         var engine = CreateEngine();
