@@ -27,9 +27,9 @@ public sealed class UpgradeCatalog
             new UpgradeDefinition(UpgradeType.Battery, "Battery", 250, "Recharges shield by 25."),
             new UpgradeDefinition(UpgradeType.Teleporter, "Teleporter", 700, "Reposition once before firing."),
             new UpgradeDefinition(UpgradeType.WindMeter, "Wind Meter", 500, "Shows precise wind."),
-            new UpgradeDefinition(UpgradeType.TracerRounds, "Tracer Rounds", 250, "Shows previous trajectory ghost."),
+            new UpgradeDefinition(UpgradeType.TracerRounds, "Tracer Rounds", 250, "Adds one previous-shot trail slot."),
             new UpgradeDefinition(UpgradeType.TargetingComputer, "Targeting Computer", 1000, "Shows approximate arc preview."),
-            new UpgradeDefinition(UpgradeType.PatriotBattery, "Patriot Battery", 450, "Single-use arcade defense that intercepts one threatening CPU shot.")
+            new UpgradeDefinition(UpgradeType.PatriotBattery, "Patriot Battery", 450, "Adds one arcade interceptor for a threatening CPU shot.")
         ];
 
         _upgrades = _all.ToFrozenDictionary(static upgrade => upgrade.Type);

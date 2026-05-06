@@ -152,12 +152,12 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         var resolvedExplosions = new List<ExplosionResult>(simulation.Explosions.Count);
         int touched;
         if (owner.IsCpu
-            && opponent.Upgrades.Contains(UpgradeType.PatriotBattery)
+            && HasPatriotInterceptor(opponent)
             && PatriotDefense.ShouldIntercept(opponent, simulation.Explosions, simulation.Trail))
         {
             intercepted = true;
             interceptPoint = PatriotDefense.InterceptPoint(opponent, simulation.Trail);
-            opponent.Upgrades.Remove(UpgradeType.PatriotBattery);
+            ConsumePatriotInterceptor(opponent);
             resolvedExplosions.Add(new ExplosionResult(interceptPoint.Value, 34, 0, 0, 0, false, false, [], ShotVisualKind.PatriotIntercept));
             touched = 0;
         }
@@ -242,6 +242,18 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
     /// Attempts to buy and apply an upgrade for the player tank.
     /// </summary>
     public bool BuyUpgrade(GameState state, UpgradeType upgradeType) => Economy.BuyUpgrade(state.PlayerTank, upgradeType);
+
+    private static bool HasPatriotInterceptor(Tank tank) =>
+        tank.PatriotBatteryCharges > 0 || tank.Upgrades.Contains(UpgradeType.PatriotBattery);
+
+    private static void ConsumePatriotInterceptor(Tank tank)
+    {
+        if (tank.PatriotBatteryCharges > 0)
+            tank.PatriotBatteryCharges--;
+
+        if (tank.PatriotBatteryCharges <= 0)
+            tank.Upgrades.Remove(UpgradeType.PatriotBattery);
+    }
 
     /// <summary>
     /// Produces the approximate player shot preview used by the targeting computer.

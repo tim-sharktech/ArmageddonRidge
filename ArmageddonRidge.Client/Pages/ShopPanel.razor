@@ -32,6 +32,10 @@
                 <div>
                     <strong>@upgrade.DisplayName</strong>
                     <span>@upgrade.Cost cash</span>
+                    @if (!string.IsNullOrEmpty(UpgradeCountLabel(upgrade.Type)))
+                    {
+                        <span class="owned-count">@UpgradeCountLabel(upgrade.Type)</span>
+                    }
                     <small>@upgrade.Description</small>
                 </div>
                 <button disabled="@(State.PlayerTank.Cash < upgrade.Cost)" @onclick="() => BuyUpgradeAsync(upgrade.Type)">Buy</button>

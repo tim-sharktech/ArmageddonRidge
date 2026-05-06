@@ -18,6 +18,7 @@ public sealed class WasmRenderCommandBuilder
         AddBackground(commands, scene);
         AddTerrain(commands, scene);
         AddRadiation(commands, scene);
+        AddTracerTrails(commands, scene.TracerTrails);
         AddPreview(commands, scene.PreviewTrail);
         AddTank(commands, scene.Player, "#50c5b7", "#d7f7ff");
         AddTank(commands, scene.Cpu, "#ec6a5c", "#ffd6d0");
@@ -123,6 +124,24 @@ public sealed class WasmRenderCommandBuilder
         if (preview.Cone.Length >= 3)
         {
             commands.Add(new RenderCommand { Op = "poly", Points = Flatten(preview.Cone), Fill = "rgba(80,197,183,0.16)", Stroke = "rgba(80,197,183,0.46)", LineWidth = 1 });
+        }
+    }
+
+    private static void AddTracerTrails(List<RenderCommand> commands, IReadOnlyList<RenderPoint[]> trails)
+    {
+        for (var i = 0; i < trails.Count; i++)
+        {
+            var trail = trails[i];
+            if (trail.Length < 2) continue;
+
+            var alpha = Math.Clamp(0.22f + (i / (float)Math.Max(1, trails.Count)) * 0.34f, 0.22f, 0.56f);
+            commands.Add(new RenderCommand
+            {
+                Op = "polyline",
+                Points = Flatten(trail),
+                Stroke = $"rgba(255,248,217,{alpha:0.###})",
+                LineWidth = 2
+            });
         }
     }
 

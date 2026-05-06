@@ -55,5 +55,12 @@ public partial class ShopPanel
 
     private Task BuyUpgradeAsync(UpgradeType upgradeType) => OnBuyUpgrade.InvokeAsync(upgradeType);
 
+    private string UpgradeCountLabel(UpgradeType upgradeType) => upgradeType switch
+    {
+        UpgradeType.PatriotBattery when State.PlayerTank.PatriotBatteryCharges > 0 => $"{State.PlayerTank.PatriotBatteryCharges} ready",
+        UpgradeType.TracerRounds when State.PlayerTank.TracerRoundCharges > 0 => $"{State.PlayerTank.TracerRoundCharges} trails",
+        _ => string.Empty
+    };
+
     private static string IconFor(string id) => $"assets/sprites/icons/{id.ToLowerInvariant()}.png";
 }

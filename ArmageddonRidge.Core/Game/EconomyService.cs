@@ -55,6 +55,12 @@ public sealed class EconomyService(WeaponCatalog weapons, UpgradeCatalog upgrade
             case UpgradeType.Battery:
                 tank.Shield += 25;
                 break;
+            case UpgradeType.TracerRounds:
+                tank.TracerRoundCharges++;
+                break;
+            case UpgradeType.PatriotBattery:
+                tank.PatriotBatteryCharges++;
+                break;
         }
 
         return true;

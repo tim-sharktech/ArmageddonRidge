@@ -658,6 +658,23 @@ select {
     background: rgba(255, 248, 217, 0.42);
 }
 
+.dock-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+    margin-bottom: 7px;
+}
+
+.dock-actions button {
+    min-height: 24px;
+    padding: 0 8px;
+    border-color: rgba(126, 226, 213, 0.26);
+    background: rgba(16, 24, 32, 0.7);
+    color: #d7f7ff;
+    font-size: 0.68rem;
+    font-weight: 900;
+}
+
 .command-toggle {
     min-height: 30px;
     border-color: rgba(255, 248, 217, 0.24);
@@ -908,6 +925,16 @@ select {
 }
 
 .shop-item small, .shop-item span { color: var(--muted); }
+
+.shop-item .owned-count {
+    width: fit-content;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(126, 226, 213, 0.14);
+    color: #d7f7ff;
+    font-size: 0.72rem;
+    font-weight: 900;
+}
 
 .perf-overlay, .taunt {
     position: absolute;

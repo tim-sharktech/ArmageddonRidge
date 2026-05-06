@@ -298,6 +298,7 @@ function drawScene(scene, offsetX, offsetY) {
     drawWeather(scene, false);
     drawTerrain(scene.terrain ?? [], scene.world);
     drawRadiation(scene.radiation ?? []);
+    drawTracerTrails(scene.tracerTrails ?? []);
     drawAimPreview(scene.previewTrail ?? []);
     const now = performance.now();
     drawTank(scene.player, "playerTank", isTankHurt(scene.player, scene, "player"), isTankShieldHit(scene.player, scene, "player"), now);
@@ -306,6 +307,40 @@ function drawScene(scene, offsetX, offsetY) {
         drawWind(scene.wind);
     }
     drawWeather(scene, true);
+    ctx.restore();
+}
+
+function drawTracerTrails(trails) {
+    if (!Array.isArray(trails) || trails.length === 0) {
+        return;
+    }
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let i = 0; i < trails.length; i++) {
+        const trail = trails[i] ?? [];
+        if (trail.length < 2) {
+            continue;
+        }
+
+        const alpha = clamp(0.2 + ((i + 1) / trails.length) * 0.34, 0.2, 0.54);
+        ctx.strokeStyle = `rgba(255, 248, 217, ${alpha})`;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([10, 10]);
+        ctx.beginPath();
+        for (let pointIndex = 0; pointIndex < trail.length; pointIndex++) {
+            const point = trail[pointIndex];
+            if (pointIndex === 0) {
+                ctx.moveTo(point.x, point.y);
+            } else {
+                ctx.lineTo(point.x, point.y);
+            }
+        }
+        ctx.stroke();
+    }
+
+    ctx.setLineDash([]);
     ctx.restore();
 }
 
@@ -1557,6 +1592,9 @@ function drawPatriotCountermeasure(scene, options, pathProgress) {
         drawPatriotLaunchPlume(startX, startY, launchProgress);
         drawPatriotFlightTrail(startX, startY, controlX, controlY, endX, endY, missileProgress);
         drawPatriotInterceptGuide(apexX, apexY, endX, endY, launchProgress, now);
+        if (launchProgress > 0.72) {
+            drawInterceptBanner(endX, endY, clamp((launchProgress - 0.72) / 0.28, 0, 1), now);
+        }
 
         const glow = ctx.createRadialGradient(x, y, 1, x, y, 44);
         glow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
@@ -1570,6 +1608,36 @@ function drawPatriotCountermeasure(scene, options, pathProgress) {
         drawOrientedSprite("missile", x, y, 72, 27, angle);
     }
 
+    ctx.restore();
+}
+
+function drawInterceptBanner(x, y, progress, now) {
+    const rise = Math.sin(progress * Math.PI) * 24;
+    const scale = 0.82 + Math.sin(progress * Math.PI) * 0.28;
+    const alpha = clamp01(Math.sin(progress * Math.PI));
+    const text = "INTERCEPTED!";
+    ctx.save();
+    ctx.translate(x, y - 92 - rise);
+    ctx.scale(scale, scale);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "900 34px system-ui, sans-serif";
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = `rgba(8, 12, 18, ${0.86 * alpha})`;
+    ctx.strokeText(text, 0, 0);
+
+    const colors = ["#ff4d6d", "#f2c14e", "#7ee2d5", "#79d6ff"];
+    for (let i = 0; i < colors.length; i++) {
+        const wobble = Math.sin(now * 0.012 + i) * 2.5;
+        ctx.fillStyle = colors[i];
+        ctx.globalAlpha = alpha * (0.5 + i * 0.13);
+        ctx.fillText(text, wobble + (i - 1.5) * 2, (i - 1.5) * 1.7);
+    }
+
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = "rgba(255, 248, 217, 0.78)";
+    ctx.lineWidth = 2;
+    ctx.strokeText(text, 0, 0);
     ctx.restore();
 }
 
@@ -1706,9 +1774,7 @@ function drawDroneSwarmTrail(points, count, weaponId) {
         const tailIndex = Math.max(0, headIndex - 5);
         const tail = dronePoint(points, tailIndex, drone, phase, spin);
         const baseAngle = Math.atan2(head.y - tail.y, head.x - tail.x);
-        const wobbleAngle = Math.sin((headIndex * (0.13 + drone * 0.025) * spin) + phase) * 0.85;
-        const tumbleAngle = Math.cos((headIndex * (0.07 + drone * 0.018) * -spin) + phase * 1.7) * 0.42;
-        const angle = baseAngle + wobbleAngle + tumbleAngle;
+        const angle = baseAngle + Math.sin((headIndex * 0.045) + phase) * 0.16;
         drawShahedDrone(head.x, head.y, angle, weaponId, 1 + (drone % 3) * 0.06);
     }
 }
@@ -1727,9 +1793,9 @@ function dronePoint(points, index, drone, phase, spin) {
     const lane = drone - 2;
     const wanderRate = (0.17 + (drone * 0.033)) * spin;
     const counterRate = (0.11 + (drone * 0.021)) * -spin;
-    const swirl = Math.sin((index * wanderRate) + phase) * (12 + (drone % 3) * 3.5);
-    const corkscrew = Math.cos((index * counterRate) + phase * 1.9) * (7 + (drone % 2) * 3);
-    const offset = (lane * 8) + swirl + Math.sin(index * 0.045 + phase * 2.2) * 5;
+    const swirl = Math.sin((index * wanderRate) + phase) * (16 + (drone % 3) * 3.5);
+    const corkscrew = Math.cos((index * counterRate) + phase * 1.9) * (4 + (drone % 2) * 2);
+    const offset = (lane * 9) + swirl + Math.sin(index * 0.045 + phase * 2.2) * 6;
     return {
         x: point.x + (normalX * offset) + (tangentX * corkscrew),
         y: point.y + (normalY * offset) + (tangentY * corkscrew)

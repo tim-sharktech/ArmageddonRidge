@@ -106,6 +106,10 @@
                             <span></span>
                             <span></span>
                         </div>
+                        <div class="dock-actions" aria-label="Dock battle controls">
+                            <button title="Dock controls left" @onclick="DockBattlePanelLeft">Left</button>
+                            <button title="Dock controls right" @onclick="DockBattlePanelRight">Right</button>
+                        </div>
                         @if (_battlePanelCollapsed)
                         {
                             <div class="floating-instruments">

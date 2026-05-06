@@ -240,6 +240,24 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void DirectHullHitsDeductOpponentHealth()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        var heights = Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray();
+        state.Terrain.CopyFrom(new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights));
+        state.PlayerTank.Position = new Vector2(160, 620);
+        state.CpuTank.Position = new Vector2(300, 620);
+        state.Wind = 0;
+        engine.StartBattle(state);
+
+        engine.FireCurrentTurn(state, settings, angle: 0, power: 100);
+
+        Assert.True(state.CpuTank.Health < state.CpuTank.MaxHealth);
+    }
+
+    [Fact]
     public void DirectShieldHitsBleedSomeDamageThroughToHealth()
     {
         var engine = CreateEngine();
@@ -257,6 +275,37 @@ public sealed class GameEngineTests
 
         Assert.True(state.CpuTank.Shield < 120);
         Assert.True(state.CpuTank.Health < state.CpuTank.MaxHealth);
+    }
+
+    [Fact]
+    public void PatriotBatteryPurchasesStackAndConsumeOneAtATime()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(Difficulty: Difficulty.Oracle, TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        engine.BuyUpgrade(state, UpgradeType.PatriotBattery);
+        engine.BuyUpgrade(state, UpgradeType.PatriotBattery);
+        engine.StartBattle(state);
+        state.CurrentTurn = TurnOwner.Cpu;
+        state.CpuTank.AddWeapon(WeaponIds.DarkEagle, 1);
+
+        var result = engine.FireCurrentTurn(state, settings);
+
+        Assert.True(result.Intercepted);
+        Assert.Equal(1, state.PlayerTank.PatriotBatteryCharges);
+        Assert.Contains(UpgradeType.PatriotBattery, state.PlayerTank.Upgrades);
+    }
+
+    [Fact]
+    public void TracerRoundPurchasesStackAsTrailSlots()
+    {
+        var engine = CreateEngine();
+        var state = engine.NewMatch(new MatchSettings(TerrainSeed: 123, EnableShop: false));
+
+        engine.BuyUpgrade(state, UpgradeType.TracerRounds);
+        engine.BuyUpgrade(state, UpgradeType.TracerRounds);
+
+        Assert.Equal(2, state.PlayerTank.TracerRoundCharges);
     }
 
     [Fact]

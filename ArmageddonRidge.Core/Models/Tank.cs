@@ -73,6 +73,16 @@ public sealed class Tank
     public bool HasParachute { get; set; }
 
     /// <summary>
+    /// Number of single-use Patriot interceptors available.
+    /// </summary>
+    public int PatriotBatteryCharges { get; set; }
+
+    /// <summary>
+    /// Number of previous player shot trails to keep visible.
+    /// </summary>
+    public int TracerRoundCharges { get; set; }
+
+    /// <summary>
     /// Non-free weapon counts keyed by weapon identifier.
     /// </summary>
     public Dictionary<string, int> Inventory { get; } = new(StringComparer.OrdinalIgnoreCase);

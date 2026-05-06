@@ -12,6 +12,7 @@ public sealed record RenderScene(
     string Phase,
     string SelectedWeapon,
     RenderPreviewTrail PreviewTrail,
+    RenderPoint[][] TracerTrails,
     RenderRadiationZone[] Radiation,
     RenderTank Player,
     RenderTank Cpu,

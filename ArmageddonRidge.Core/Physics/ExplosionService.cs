@@ -84,7 +84,7 @@ public sealed class ExplosionService
 
         var distance = tank.Shield > 0
             ? DistanceToShieldEnvelope(tank, center)
-            : Vector2.Distance(tank.Center, center);
+            : DistanceToHullEnvelope(tank, center);
         var distanceSquared = distance * distance;
         var radiusSquared = weapon.BlastRadius * weapon.BlastRadius;
         if (distanceSquared >= radiusSquared) return 0;
@@ -122,6 +122,14 @@ public sealed class ExplosionService
         var boundaryScale = 1f / normalized;
         var boundary = new Vector2(center.X + (dx * boundaryScale), center.Y + (dy * boundaryScale));
         return Vector2.Distance(point, boundary);
+    }
+
+    private static float DistanceToHullEnvelope(Tank tank, Vector2 point)
+    {
+        var halfWidth = GameConstants.TankCollisionWidth / 2f;
+        var closestX = Math.Clamp(point.X, tank.Position.X - halfWidth, tank.Position.X + halfWidth);
+        var closestY = Math.Clamp(point.Y, tank.Position.Y - GameConstants.TankCollisionHeight, tank.Position.Y);
+        return Vector2.Distance(point, new Vector2(closestX, closestY));
     }
 
     private static ShotVisualKind VisualKindFor(WeaponDefinition weapon) => weapon.BehaviorType switch

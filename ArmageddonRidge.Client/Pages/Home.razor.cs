@@ -61,10 +61,12 @@ public partial class Home
     private double _battlePanelStartOffsetY;
     private double _battlePanelOffsetX;
     private double _battlePanelOffsetY;
+    private string _battlePanelAnchor = "auto";
     private WeaponDefinition[] _allWeapons = [];
     private UpgradeDefinition[] _allUpgrades = [];
     private string[] _unlockedWeaponIds = [];
     private WeaponDefinition[] _availablePlayerWeapons = [];
+    private readonly List<RenderPoint[]> _tracerTrails = [];
 
     private IReadOnlyCollection<WeaponDefinition> AllWeapons => _allWeapons;
 
@@ -100,11 +102,15 @@ public partial class Home
 
     private double BattlePanelBaseLeftPercent => _state is null
         ? 68
-        : _state.CpuTank.Position.X >= GameConstants.WorldWidth * 0.5f ? 30 : 70;
+        : _battlePanelAnchor == "left"
+            ? 15
+            : _battlePanelAnchor == "right"
+                ? 85
+                : _state.CpuTank.Position.X >= GameConstants.WorldWidth * 0.5f ? 15 : 85;
 
     private double BattlePanelBaseTopPercent => _state is null
         ? 44
-        : _state.CpuTank.Position.Y >= GameConstants.WorldHeight * 0.55f ? 36 : 66;
+        : _state.CpuTank.Position.Y >= GameConstants.WorldHeight * 0.55f ? 42 : 60;
 
     private string BattleLayoutCss => _state?.Phase == GamePhase.Battle
         ? (_battlePanelCollapsed ? "is-battle panel-collapsed" : "is-battle")
@@ -184,6 +190,7 @@ public partial class Home
         _settings = new MatchSettings(Difficulty: _difficulty, StartingCash: _startingCash, TerrainSeed: Random.Shared.Next(10_000, 99_999));
         _state = Engine.NewMatch(_settings);
         ClearDamageFeedback();
+        _tracerTrails.Clear();
         RefreshPlayerWeapons();
         ResetRenderCache();
         await Audio.UnlockAsync();
@@ -196,6 +203,7 @@ public partial class Home
 
         Engine.StartBattle(_state);
         _battlePanelCollapsed = true;
+        _battlePanelAnchor = "auto";
         ResetBattlePanelDrag();
         await Audio.PlayAsync("menu");
         await RenderSceneAsync();
@@ -207,6 +215,7 @@ public partial class Home
 
         Engine.StartNextRound(_state, _settings);
         ClearDamageFeedback();
+        _tracerTrails.Clear();
         RefreshPlayerWeapons();
         MarkTerrainChanged();
         await RenderSceneAsync();
@@ -226,6 +235,7 @@ public partial class Home
             var cpuShieldBefore = _state.CpuTank.Shield;
             var playerPreShotScene = BuildScene();
             var playerShot = Engine.FireCurrentTurn(_state, _settings, _state.PlayerTank.TurretAngle, _power);
+            RecordTracerTrail(playerShot.Trail);
             await PlayResolutionAsync(
                 playerPreShotScene,
                 playerShot,
@@ -385,6 +395,7 @@ public partial class Home
                 WeaponIds.PeaShell,
                 EmptyPreview(),
                 [],
+                [],
                 new RenderTank("player", 0, 0, 45, 0, 0, false, 0, 0),
                 new RenderTank("cpu", 0, 0, 45, 0, 0, true, 0, 0));
         }
@@ -399,6 +410,7 @@ public partial class Home
             _state.Phase.ToString(),
             _state.SelectedWeaponId,
             PreviewTrailDto(),
+            _tracerTrails.ToArray(),
             RadiationDto(_state.RadiationZones),
             TankDto(_state.PlayerTank, _state.Terrain),
             TankDto(_state.CpuTank, _state.Terrain),
@@ -460,7 +472,12 @@ public partial class Home
         return radiation;
     }
 
-    private bool HasTracerRounds => _state?.PlayerTank.Upgrades.Contains(UpgradeType.TracerRounds) == true;
+    private bool HasTracerRounds =>
+        _state?.PlayerTank.TracerRoundCharges > 0 || _state?.PlayerTank.Upgrades.Contains(UpgradeType.TracerRounds) == true;
+
+    private int TracerTrailCapacity => Math.Max(
+        _state?.PlayerTank.TracerRoundCharges ?? 0,
+        _state?.PlayerTank.Upgrades.Contains(UpgradeType.TracerRounds) == true ? 1 : 0);
 
     private bool HasTargetingComputer => _targetingComputerEnabledByDefault || _state?.PlayerTank.Upgrades.Contains(UpgradeType.TargetingComputer) == true;
 
@@ -519,6 +536,18 @@ public partial class Home
     }
 
     private static RenderPreviewTrail EmptyPreview() => new([], []);
+
+    private void RecordTracerTrail(IReadOnlyList<Vector2> trail)
+    {
+        var capacity = TracerTrailCapacity;
+        if (capacity <= 0 || trail.Count < 2) return;
+
+        _tracerTrails.Add(WasmRenderCommandBuilder.DownsampleTrailScalar(trail, 96));
+        while (_tracerTrails.Count > capacity)
+        {
+            _tracerTrails.RemoveAt(0);
+        }
+    }
 
     private static float TinyPreviewNoise(int seed, int round, float angle, int power)
     {
@@ -657,6 +686,18 @@ public partial class Home
         if (_state?.Phase == GamePhase.Battle) _battlePanelCollapsed = !_battlePanelCollapsed;
     }
 
+    private void DockBattlePanelLeft() => DockBattlePanel("left");
+
+    private void DockBattlePanelRight() => DockBattlePanel("right");
+
+    private void DockBattlePanel(string anchor)
+    {
+        if (_state?.Phase != GamePhase.Battle) return;
+
+        _battlePanelAnchor = anchor;
+        ResetBattlePanelDrag();
+    }
+
     private void BeginBattlePanelDrag(PointerEventArgs args)
     {
         if (args.Button != 0) return;
@@ -672,8 +713,8 @@ public partial class Home
     {
         if (!_battlePanelDragging) return;
 
-        _battlePanelOffsetX = Math.Clamp(_battlePanelStartOffsetX + args.ClientX - _battlePanelDragStartX, -420, 260);
-        _battlePanelOffsetY = Math.Clamp(_battlePanelStartOffsetY + args.ClientY - _battlePanelDragStartY, -260, 260);
+        _battlePanelOffsetX = Math.Clamp(_battlePanelStartOffsetX + args.ClientX - _battlePanelDragStartX, -760, 760);
+        _battlePanelOffsetY = Math.Clamp(_battlePanelStartOffsetY + args.ClientY - _battlePanelDragStartY, -320, 320);
     }
 
     private void EndBattlePanelDrag(PointerEventArgs args) => _battlePanelDragging = false;
