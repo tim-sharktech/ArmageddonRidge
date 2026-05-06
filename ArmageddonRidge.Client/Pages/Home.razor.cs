@@ -109,8 +109,8 @@ public partial class Home
                 : _state.CpuTank.Position.X >= GameConstants.WorldWidth * 0.5f ? 15 : 85;
 
     private double BattlePanelBaseTopPercent => _state is null
-        ? 44
-        : _state.CpuTank.Position.Y >= GameConstants.WorldHeight * 0.55f ? 42 : 60;
+        ? 50
+        : 50;
 
     private string BattleLayoutCss => _state?.Phase == GamePhase.Battle
         ? (_battlePanelCollapsed ? "is-battle panel-collapsed" : "is-battle")
@@ -119,6 +119,8 @@ public partial class Home
     private string BattlePanelToggleTitle => _battlePanelCollapsed ? "Hide command panel" : "Show command panel";
 
     private string AngleGaugeStyle => FormattableString.Invariant($"--angle-rotation:{AngleGaugeRotation:0.###}deg;");
+
+    private float AngleScrubValue => 90f - Math.Clamp(_state?.PlayerTank.TurretAngle ?? 45f, 5f, 85f);
 
     private float AngleGaugeRotation
     {
@@ -652,6 +654,14 @@ public partial class Home
         if (_state is null || !float.TryParse(args.Value?.ToString(), out var angle)) return;
 
         _state.PlayerTank.TurretAngle = Math.Clamp(angle, 5, 85);
+        await RenderSceneAsync();
+    }
+
+    private async Task HandleAngleScrubInputAsync(ChangeEventArgs args)
+    {
+        if (_state is null || !float.TryParse(args.Value?.ToString(), out var scrubValue)) return;
+
+        _state.PlayerTank.TurretAngle = Math.Clamp(90f - scrubValue, 5f, 85f);
         await RenderSceneAsync();
     }
 

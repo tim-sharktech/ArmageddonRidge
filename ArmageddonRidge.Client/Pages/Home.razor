@@ -107,8 +107,8 @@
                             <span></span>
                         </div>
                         <div class="dock-actions" aria-label="Dock battle controls">
-                            <button title="Dock controls left" @onclick="DockBattlePanelLeft">Left</button>
-                            <button title="Dock controls right" @onclick="DockBattlePanelRight">Right</button>
+                            <button title="Dock controls left" @onclick="DockBattlePanelLeft">L</button>
+                            <button title="Dock controls right" @onclick="DockBattlePanelRight">R</button>
                         </div>
                         @if (_battlePanelCollapsed)
                         {
@@ -132,7 +132,7 @@
                                         <span class="dial-needle"></span>
                                         <span class="dial-hub"></span>
                                     </span>
-                                    <input class="dial-scrub" type="range" min="5" max="85" step="1" value="@_state.PlayerTank.TurretAngle" @oninput="HandleAngleInputAsync" aria-label="Angle" />
+                                    <input class="dial-scrub" type="range" min="5" max="85" step="1" value="@AngleScrubValue" @oninput="HandleAngleScrubInputAsync" aria-label="Angle" />
                                 </label>
                                 <label class="velocity-control">
                                     <span>Velocity <strong>@_power</strong></span>

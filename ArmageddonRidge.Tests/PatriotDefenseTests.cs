@@ -65,6 +65,36 @@ public sealed class PatriotDefenseTests
         Assert.Equal(trail[2], PatriotDefense.InterceptPoint(tank, trail));
     }
 
+    [Fact]
+    public void PatriotDefenseWaitsForReadableInterceptPointWhenApexIsOffscreen()
+    {
+        var tank = Tank("player", 300, 500);
+        var trail = new[]
+        {
+            new Vector2(940, 420),
+            new Vector2(780, 120),
+            new Vector2(620, -80),
+            new Vector2(470, 86),
+            new Vector2(335, 270)
+        };
+
+        Assert.Equal(trail[4], PatriotDefense.InterceptPoint(tank, trail));
+    }
+
+    [Fact]
+    public void PatriotDefenseClampsInterceptPointWhenTrailNeverReturnsToScreen()
+    {
+        var tank = Tank("player", 300, 500);
+        var trail = new[]
+        {
+            new Vector2(40, -120),
+            new Vector2(260, -180),
+            new Vector2(460, -90)
+        };
+
+        Assert.Equal(new Vector2(260, 54), PatriotDefense.InterceptPoint(tank, trail));
+    }
+
     private static Tank Tank(string id, float x, float y) => new()
     {
         Id = id,
