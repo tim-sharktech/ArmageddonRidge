@@ -84,6 +84,7 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
     const shotScene = prepareScene(scene);
     shotInProgress = true;
     const playbackOptions = options ?? {};
+    const suppressCanvasPatriotCountermeasure = Boolean(playbackOptions.suppressCanvasPatriotCountermeasure);
     let points = Array.isArray(trail) ? trail : Array.from(trail);
     if (playbackOptions.intercepted && playbackOptions.interceptX !== undefined && playbackOptions.interceptY !== undefined) {
         const patriotPlayback = createPatriotPlayback(points, { x: playbackOptions.interceptX, y: playbackOptions.interceptY });
@@ -155,7 +156,9 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
                 const shake = screenShake && highImpactShake ? Math.sin(now * 0.08) * (1 - t) * 8 : 0;
                 drawScene(shotScene, shake, -shake * 0.4);
                 drawTrail(points, count, weaponId, activeExplosions, playbackOptions.visualKind);
-                drawPatriotCountermeasure(shotScene, playbackOptions, patriotTimelineProgress);
+                if (!suppressCanvasPatriotCountermeasure) {
+                    drawPatriotCountermeasure(shotScene, playbackOptions, patriotTimelineProgress);
+                }
                 drawTriggeredExplosions(stagedExplosions, count, now, stagedStarts);
                 if (t < 1) {
                     requestAnimationFrame(tick);
@@ -166,7 +169,9 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
                     try {
                         drawScene(shotScene, 0, 0);
                         drawTrail(points, points.length, weaponId, activeExplosions, playbackOptions.visualKind);
-                        drawPatriotCountermeasure(shotScene, playbackOptions, 1);
+                        if (!suppressCanvasPatriotCountermeasure) {
+                            drawPatriotCountermeasure(shotScene, playbackOptions, 1);
+                        }
                         drawTriggeredExplosions(stagedExplosions, points.length, performance.now(), stagedStarts);
                         finish();
                     } catch (error) {
@@ -1687,9 +1692,9 @@ function drawInterceptBanner(x, y, progress, now) {
 }
 
 function drawPatriotReticle(x, y, alpha, now, scale = 1) {
-    const pulse = 0.72 + Math.sin(now * 0.018) * 0.28;
+    const pulse = 0.5 + Math.sin(now * 0.018) * 0.5;
     const spin = now * 0.0045;
-    const radius = (20 + pulse * 15) * scale;
+    const radius = 34 * scale;
     const armInner = 12 * scale;
     const armOuter = 42 * scale;
 
@@ -1697,13 +1702,13 @@ function drawPatriotReticle(x, y, alpha, now, scale = 1) {
     ctx.globalAlpha = clamp01(alpha);
     ctx.strokeStyle = `rgba(255, 248, 217, ${0.42 + pulse * 0.34})`;
     ctx.lineWidth = 2 + scale;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, spin, spin + Math.PI * 0.72);
-    ctx.arc(x, y, radius, spin + Math.PI, spin + Math.PI * 1.72);
-    ctx.stroke();
+    ctx.lineCap = "round";
+    strokeArcSegment(x, y, radius, spin, spin + Math.PI * 0.72);
+    strokeArcSegment(x, y, radius, spin + Math.PI, spin + Math.PI * 1.72);
 
     ctx.strokeStyle = `rgba(121, 214, 255, ${0.52 + pulse * 0.28})`;
     ctx.lineWidth = 1.5 + scale * 0.5;
+    ctx.lineCap = "butt";
     ctx.beginPath();
     ctx.arc(x, y, radius * 0.55, 0, Math.PI * 2);
     ctx.stroke();
@@ -1720,6 +1725,12 @@ function drawPatriotReticle(x, y, alpha, now, scale = 1) {
     ctx.lineTo(x, y + armOuter);
     ctx.stroke();
     ctx.restore();
+}
+
+function strokeArcSegment(x, y, radius, startAngle, endAngle) {
+    ctx.beginPath();
+    ctx.arc(x, y, radius, startAngle, endAngle);
+    ctx.stroke();
 }
 
 function drawPatriotHoldField(x, y, progress, now) {

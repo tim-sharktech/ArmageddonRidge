@@ -328,15 +328,22 @@ public partial class Home
             await Audio.PlayAsync(hasNuclear ? "nuclear" : "fire");
             impactAudioTask = PlayImpactAudioDuringPlaybackAsync(resolution, shieldHit, healthHit, hasNuclear);
             impactFeedbackTask = PlayImpactFeedbackDuringPlaybackAsync(resolution, playerHealthBefore, cpuHealthBefore, playerShieldBefore, cpuShieldBefore);
-            ApplyEffectsStats(await Effects.SpawnShotEffectsAsync(
+            var effectsStats = await Effects.SpawnShotEffectsAsync(
                 resolution,
                 preShotScene.Wind,
                 _terrainRevision,
                 shieldHit,
                 healthHit,
                 _reducedMotion,
-                "flight"));
-            await Renderer.PlayShotAsync(preShotScene, resolution, _screenShake && !_reducedMotion);
+                "flight",
+                _renderMode == RenderMode.Hybrid);
+            ApplyEffectsStats(effectsStats);
+            var suppressCanvasPatriotCountermeasure =
+                resolution.Intercepted &&
+                _renderMode == RenderMode.Hybrid &&
+                _webGpuEffectsEnabled &&
+                effectsStats?.Enabled == true;
+            await Renderer.PlayShotAsync(preShotScene, resolution, _screenShake && !_reducedMotion, suppressCanvasPatriotCountermeasure);
             await impactAudioTask;
             await impactFeedbackTask;
             if (resolution.RoundEnded && hasNuclear)

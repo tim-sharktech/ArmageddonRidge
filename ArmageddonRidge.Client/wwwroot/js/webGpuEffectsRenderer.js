@@ -44,12 +44,16 @@ let radialWriteIndex = 0;
 let spawnCount = 0;
 let scheduledImpactId = 0;
 let activeRadialCount = 0;
+let patriotState;
 
 const maxParticles = 6000;
 const particleFloats = 12;
 const particleStride = particleFloats * 4;
 const maxRadialEffects = 96;
 const persistentRadialSlots = 24;
+const reservedRadialSlots = 4;
+const radialTransientEnd = maxRadialEffects - reservedRadialSlots;
+const patriotReticleSlot = maxRadialEffects - 1;
 const radialFloats = 16;
 const radialStride = radialFloats * 4;
 const workgroupSize = 64;
@@ -83,8 +87,13 @@ const radialKinds = {
     heat: 3,
     dust: 4,
     lava: 5,
-    glow: 6
+    glow: 6,
+    patriotReticle: 7
 };
+
+const patriotInterceptDurationScale = 2.6;
+const patriotInterceptMinDuration = 2900;
+const patriotInterceptMaxDuration = 3400;
 
 const qualityProfiles = {
     high: { scale: 1, level: 2, ambient: 1, distortion: 1 },
@@ -220,6 +229,7 @@ export async function initialize(baseElement, overlayElement, options = {}) {
         supported = false;
         fallbackReason = "Disabled";
         clearScheduledImpact();
+        clearPatriotState();
         clearCpuState();
         return getStats();
     }
@@ -229,6 +239,7 @@ export async function initialize(baseElement, overlayElement, options = {}) {
         supported = false;
         fallbackReason = "WebGPU unavailable";
         clearScheduledImpact();
+        clearPatriotState();
         clearCpuState();
         return getStats();
     }
@@ -280,6 +291,7 @@ export async function setEnabled(value) {
         enabled = false;
         fallbackReason = "Disabled";
         clearScheduledImpact();
+        clearPatriotState();
         clearCpuState();
         clearOverlay();
         stopLoop();
@@ -316,6 +328,7 @@ export function spawnShotEffects(payload) {
 
     if (String(payload?.phase ?? "").toLowerCase() === "flight") {
         spawnFlightEffects(payload);
+        startPatriotInterception(payload);
         scheduleImpactEffects(payload);
     } else {
         spawnImpactEffects(payload);
@@ -392,6 +405,7 @@ export function getStats() {
 export function dispose() {
     stopLoop();
     clearScheduledImpact();
+    clearPatriotState();
     clearCpuState();
     if (particleBuffer) particleBuffer.destroy();
     if (radialBuffer) radialBuffer.destroy();
@@ -550,6 +564,7 @@ function frame(now) {
     const started = performance.now();
     resizeCanvas();
     emitAmbient(dt, now);
+    emitPatriotEffects(dt, now);
     const radialCount = updateRadialAges(now);
     copySourceCanvasIfNeeded(radialCount);
     updateUniforms(dt, now);
@@ -766,6 +781,288 @@ function estimateImpactDelayMs(payload) {
     return Math.max(80, Math.min(3400, visualDuration - 45));
 }
 
+function startPatriotInterception(payload) {
+    clearPatriotState();
+
+    if (!payload?.patriotOverlayEnabled || !payload?.intercepted || payload.interceptX === undefined || payload.interceptY === undefined || !currentScene) {
+        return;
+    }
+
+    const trail = payload?.trail ?? [];
+    const intercept = { x: Number(payload.interceptX), y: Number(payload.interceptY) };
+    if (!Number.isFinite(intercept.x) || !Number.isFinite(intercept.y)) {
+        return;
+    }
+
+    const patriot = createPatriotPlayback(trail, intercept);
+    const incomingOwner = String(payload.ownerTankId ?? "");
+    const playerTank = currentScene.player;
+    const cpuTank = currentScene.cpu;
+    const launcher = incomingOwner === String(playerTank?.id ?? "") ? cpuTank : playerTank;
+    if (!launcher) {
+        return;
+    }
+
+    const startX = Number(launcher.x ?? 0) + (launcher.isCpu ? -28 : 28);
+    const startY = Number(launcher.y ?? 0) - 46;
+    const endX = Number(patriot.interceptX ?? intercept.x);
+    const endY = Number(patriot.interceptY ?? intercept.y);
+    const apexX = Number(patriot.apexX ?? intercept.x);
+    const apexY = Number(patriot.apexY ?? intercept.y);
+    const duration = patriotShotDuration(patriot.points.length, payload.weaponId);
+
+    patriotState = {
+        started: performance.now(),
+        duration,
+        startX,
+        startY,
+        controlX: startX + ((endX - startX) * 0.22),
+        controlY: Math.min(startY, endY, apexY) - 155 - Math.abs(endX - startX) * 0.04,
+        apexX,
+        apexY,
+        endX,
+        endY,
+        holdStart: Number(patriot.holdStartProgress ?? 0.48),
+        holdEnd: Number(patriot.holdEndProgress ?? 0.68),
+        lockStart: Number(patriot.lockProgressStart ?? 0.22),
+        launchStart: Number(patriot.launchProgressStart ?? 0.72),
+        lastMissileProgress: 0,
+        lastGuideEmit: 0,
+        lastMoteEmit: 0,
+        burstSpawned: false,
+        seed: Math.random() * 1000
+    };
+
+    spawnRadialEffect(apexX, apexY, 96, 0.32, radialKinds.flash, 0.5, [0.66, 0.9, 1, 0.18], { softness: 0.62, seed: patriotState.seed });
+    startLoop();
+}
+
+function clearPatriotState() {
+    patriotState = undefined;
+    clearRadialSlot(patriotReticleSlot);
+    if (device && radialBuffer) {
+        device.queue.writeBuffer(radialBuffer, patriotReticleSlot * radialStride, radialData, patriotReticleSlot * radialFloats, radialFloats);
+    }
+}
+
+function emitPatriotEffects(dt, now) {
+    if (!patriotState) {
+        return;
+    }
+
+    const state = patriotState;
+    const elapsed = now - state.started;
+    const progress = clamp(elapsed / Math.max(1, state.duration), 0, 1);
+    const lockProgress = clamp((progress - state.lockStart) / Math.max(0.05, state.holdStart - state.lockStart), 0, 1);
+    const launchProgress = clamp((progress - state.launchStart) / Math.max(0.08, 1 - state.launchStart), 0, 1);
+    const postLaunchFade = launchProgress > 0 ? Math.max(0.42, 1 - launchProgress * 0.72) : 1;
+
+    if (lockProgress > 0) {
+        const alpha = lockProgress * postLaunchFade;
+        writeRadialSlot(patriotReticleSlot, {
+            x: state.apexX,
+            y: state.apexY,
+            radius: 58,
+            duration: 0.12,
+            type: radialKinds.patriotReticle,
+            intensity: alpha,
+            color: [0.78, 0.93, 1, 0.78],
+            wind: 0,
+            softness: 0.08,
+            seed: state.seed
+        });
+
+        if (now - state.lastMoteEmit > 65) {
+            emitPatriotLockMotes(state, alpha, now);
+            state.lastMoteEmit = now;
+        }
+    }
+
+    if (launchProgress > 0) {
+        const missileProgress = launchProgress * launchProgress * (3 - (2 * launchProgress));
+        emitPatriotGuide(state, launchProgress, now);
+        emitPatriotTrail(state, missileProgress, now);
+        state.lastMissileProgress = missileProgress;
+
+        const head = pointOnPatriotCurve(state, missileProgress);
+        spawnParticle(head.x, head.y, 0, 0, 0.74, 0.92, 1, 0.42, randomBetween(14, 22), randomBetween(0.08, 0.16), kinds.flash);
+
+        if (!state.burstSpawned && progress >= 0.965) {
+            spawnPatriotInterceptBurst(state);
+            state.burstSpawned = true;
+        }
+    }
+
+    if (progress >= 1 && elapsed > state.duration + 260) {
+        clearPatriotState();
+    }
+}
+
+function emitPatriotLockMotes(state, alpha, now) {
+    const count = scaledCount(6, 2, 8);
+    for (let i = 0; i < count; i++) {
+        const angle = now * 0.0026 + state.seed + (i / count) * Math.PI * 2;
+        const radius = randomBetween(44, 66);
+        const x = state.apexX + Math.cos(angle) * radius;
+        const y = state.apexY + Math.sin(angle) * radius;
+        spawnParticle(x, y, Math.cos(angle + Math.PI) * 10, Math.sin(angle + Math.PI) * 10, 0.64, 0.9, 1, 0.28 * alpha, randomBetween(2.5, 5.5), randomBetween(0.22, 0.42), kinds.plasma);
+    }
+}
+
+function emitPatriotGuide(state, launchProgress, now) {
+    if (now - state.lastGuideEmit < 45) return;
+
+    state.lastGuideEmit = now;
+    const alpha = Math.max(0, 0.22 * (1 - launchProgress * 0.55));
+    if (alpha <= 0.01) return;
+
+    const samples = qualityTier === "low" ? 4 : 7;
+    for (let i = 0; i <= samples; i++) {
+        const t = i / samples;
+        const x = state.apexX + (state.endX - state.apexX) * t;
+        const y = state.apexY + (state.endY - state.apexY) * t;
+        spawnParticle(x, y, 0, 0, 0.82, 0.95, 1, alpha * (0.45 + Math.sin((t + now * 0.001) * Math.PI) * 0.2), randomBetween(2.5, 4.5), randomBetween(0.16, 0.28), kinds.plasma);
+    }
+}
+
+function emitPatriotTrail(state, missileProgress, now) {
+    const previous = clamp(Number(state.lastMissileProgress ?? 0), 0, missileProgress);
+    const span = Math.max(0.001, missileProgress - previous);
+    const steps = Math.max(1, Math.min(8, Math.ceil(span * 48)));
+    for (let i = 0; i <= steps; i++) {
+        const t = previous + span * (i / steps);
+        const point = pointOnPatriotCurve(state, t);
+        const next = pointOnPatriotCurve(state, Math.min(1, t + 0.012));
+        const angle = Math.atan2(next.y - point.y, next.x - point.x);
+        const backX = Math.cos(angle + Math.PI);
+        const backY = Math.sin(angle + Math.PI);
+
+        spawnParticle(point.x, point.y, backX * randomBetween(16, 42), backY * randomBetween(16, 42), 0.72, 0.9, 1, randomBetween(0.34, 0.62), randomBetween(3, 7), randomBetween(0.16, 0.36), kinds.plasma);
+        if (!reducedMotion && i % 2 === 0) {
+            spawnParticle(point.x + randomBetween(-3, 3), point.y + randomBetween(-3, 3), backX * randomBetween(18, 54) + currentWind * 0.18, backY * randomBetween(18, 54), 0.62, 0.72, 0.78, 0.18, randomBetween(8, 18), randomBetween(0.45, 0.85), kinds.smoke);
+        }
+    }
+}
+
+function spawnPatriotInterceptBurst(state) {
+    spawnRadialEffect(state.endX, state.endY, 112, 0.28, radialKinds.flash, 1.1, [0.82, 0.96, 1, 0.5], { softness: 0.5, seed: state.seed + 17 });
+    spawnRadialEffect(state.endX, state.endY, 145, 0.75, radialKinds.shockwave, 0.86, [0.58, 0.86, 1, 0.58], { softness: 0.14, seed: state.seed + 33 });
+
+    const sparks = scaledCount(72, 26, 110);
+    for (let i = 0; i < sparks; i++) {
+        const angle = randomBetween(-Math.PI, Math.PI);
+        const speed = randomBetween(40, 230);
+        spawnParticle(state.endX, state.endY, Math.cos(angle) * speed + currentWind * 0.18, Math.sin(angle) * speed, 0.78, 0.94, 1, randomBetween(0.42, 0.78), randomBetween(2.5, 7), randomBetween(0.28, 0.82), i % 4 === 0 ? kinds.spark : kinds.plasma);
+    }
+
+    const vapor = scaledCount(38, 10, 62);
+    for (let i = 0; i < vapor; i++) {
+        const angle = randomBetween(-Math.PI, Math.PI);
+        const distance = randomBetween(4, 28);
+        spawnParticle(
+            state.endX + Math.cos(angle) * distance,
+            state.endY + Math.sin(angle) * distance,
+            Math.cos(angle) * randomBetween(10, 80) + currentWind * randomBetween(0.25, 0.75),
+            Math.sin(angle) * randomBetween(10, 80) - randomBetween(6, 32),
+            0.62,
+            0.74,
+            0.82,
+            randomBetween(0.12, 0.28),
+            randomBetween(14, 34),
+            randomBetween(0.75, 1.6),
+            kinds.smoke);
+    }
+}
+
+function pointOnPatriotCurve(state, t) {
+    const clamped = clamp(t, 0, 1);
+    return {
+        x: quadraticScalar(state.startX, state.controlX, state.endX, clamped),
+        y: quadraticScalar(state.startY, state.controlY, state.endY, clamped)
+    };
+}
+
+function createPatriotPlayback(points, intercept) {
+    const trimmed = trimTrailToIntercept(points, intercept);
+    const apexIndex = findPatriotApexIndex(trimmed);
+    const apex = trimmed[apexIndex] ?? trimmed[0] ?? intercept;
+    const apexProgress = clamp((apexIndex + 1) / Math.max(1, trimmed.length), 0.08, 1);
+    return {
+        points: trimmed,
+        apexX: apex.x,
+        apexY: apex.y,
+        apexProgress,
+        holdStartProgress: 0.48,
+        holdEndProgress: 0.68,
+        lockProgressStart: 0.22,
+        launchProgressStart: 0.72,
+        interceptX: intercept.x,
+        interceptY: intercept.y
+    };
+}
+
+function trimTrailToIntercept(points, intercept) {
+    if (!points.length) return [intercept];
+
+    let bestIndex = 0;
+    let bestDistance = Number.MAX_VALUE;
+    for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+        const dx = Number(point.x ?? 0) - intercept.x;
+        const dy = Number(point.y ?? 0) - intercept.y;
+        const distance = (dx * dx) + (dy * dy);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = i;
+        }
+    }
+
+    const trimmed = points.slice(0, Math.min(points.length, bestIndex + 1));
+    const last = trimmed[trimmed.length - 1];
+    if (!last || ((Number(last.x ?? 0) - intercept.x) ** 2) + ((Number(last.y ?? 0) - intercept.y) ** 2) > 0.01) {
+        trimmed.push(intercept);
+    }
+
+    return trimmed;
+}
+
+function findPatriotApexIndex(points) {
+    let apexIndex = 0;
+    let apexY = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < points.length; i++) {
+        const y = Number(points[i]?.y ?? Number.POSITIVE_INFINITY);
+        if (y < apexY) {
+            apexY = y;
+            apexIndex = i;
+        }
+    }
+
+    return apexIndex;
+}
+
+function patriotShotDuration(pointCount, weaponId) {
+    const id = normalized(weaponId);
+    let baseDuration;
+    if (id.includes("dark-eagle")) {
+        baseDuration = 2900;
+    } else if (id.includes("shahed") || id.includes("drone")) {
+        baseDuration = Math.min(3400, Math.max(1500, pointCount * 13));
+    } else if (id.includes("splitter") || id.includes("mirv")) {
+        baseDuration = Math.min(1800, Math.max(900, pointCount * 5.5));
+    } else if (id.includes("gbu") || id.includes("mop")) {
+        baseDuration = Math.min(2100, Math.max(900, pointCount * 8.5));
+    } else {
+        baseDuration = Math.min(1200, Math.max(260, pointCount * 4));
+    }
+
+    return clamp(baseDuration * patriotInterceptDurationScale, patriotInterceptMinDuration, patriotInterceptMaxDuration);
+}
+
+function quadraticScalar(start, control, end, t) {
+    const inverse = 1 - t;
+    return (inverse * inverse * start) + (2 * inverse * t * control) + (t * t * end);
+}
+
 function spawnImpactEffects(payload) {
     const explosions = payload?.explosions ?? [];
     const wind = Number(payload?.wind ?? currentWind);
@@ -783,6 +1080,12 @@ function spawnExplosion(explosion, payload, wind) {
     const y = Number(explosion.y ?? 0);
     const radius = Math.max(12, Number(explosion.radius ?? 36));
     const terrainRadius = Math.max(radius * 0.6, Number(explosion.terrainRadius ?? radius));
+    if (isPatriotExplosion(explosion, payload)) {
+        if (!payload?.patriotOverlayEnabled) return;
+        spawnPatriotImpactExplosion(x, y, radius, wind);
+        return;
+    }
+
     const preset = resolveExplosionPreset(explosion, payload);
     const nuclear = preset === explosionPresets.nuclear;
     const doomsday = isDoomsdayExplosion(explosion, payload, radius);
@@ -847,6 +1150,38 @@ function explosionIdentity(explosion, payload) {
 function isDoomsdayExplosion(explosion, payload, radius) {
     const visual = explosionIdentity(explosion, payload);
     return visual.includes("doomsday") || Number(radius ?? explosion?.radius ?? 0) >= 165;
+}
+
+function isPatriotExplosion(explosion, payload) {
+    const visual = explosionIdentity(explosion, payload);
+    return visual.includes("patriot") || Boolean(payload?.intercepted && Number(explosion?.terrainRadius ?? 0) <= 0);
+}
+
+function spawnPatriotImpactExplosion(x, y, radius, wind) {
+    spawnRadialEffect(x, y, radius * 3.2, 0.42, radialKinds.flash, 0.92, [0.76, 0.94, 1, 0.46], { softness: 0.42, seed: randomBetween(0, 1000) });
+    spawnRadialEffect(x, y, radius * 4.4, 0.84, radialKinds.shockwave, 0.7, [0.58, 0.86, 1, 0.52], { softness: 0.16, seed: randomBetween(0, 1000) });
+
+    for (let i = 0; i < scaledCount(radius * 1.6, 18, 90); i++) {
+        const angle = randomBetween(-Math.PI, Math.PI);
+        const speed = randomBetween(45, 210);
+        spawnParticle(x, y, Math.cos(angle) * speed + wind * 0.14, Math.sin(angle) * speed, 0.78, 0.94, 1, randomBetween(0.34, 0.72), randomBetween(2.5, 6), randomBetween(0.24, 0.72), i % 3 === 0 ? kinds.spark : kinds.plasma);
+    }
+
+    for (let i = 0; i < scaledCount(radius * 0.8, 8, 36); i++) {
+        const angle = randomBetween(-Math.PI, Math.PI);
+        spawnParticle(
+            x + Math.cos(angle) * randomBetween(0, radius * 0.6),
+            y + Math.sin(angle) * randomBetween(0, radius * 0.35),
+            Math.cos(angle) * randomBetween(8, 62) + wind * randomBetween(0.2, 0.7),
+            Math.sin(angle) * randomBetween(8, 62) - randomBetween(6, 28),
+            0.58,
+            0.7,
+            0.78,
+            randomBetween(0.1, 0.22),
+            randomBetween(12, 28),
+            randomBetween(0.72, 1.5),
+            kinds.smoke);
+    }
 }
 
 function spawnExplosionRadials(x, y, radius, terrainRadius, wind, preset, flags) {
@@ -1129,7 +1464,7 @@ function spawnRadialEffect(x, y, radius, duration, type, intensity, color, optio
 
     const index = radialWriteIndex;
     radialWriteIndex++;
-    if (radialWriteIndex >= maxRadialEffects) radialWriteIndex = persistentRadialSlots;
+    if (radialWriteIndex >= radialTransientEnd) radialWriteIndex = persistentRadialSlots;
 
     writeRadialSlot(index, {
         x,
@@ -1689,6 +2024,16 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
         let body = smoothstep(1.05, 0.0, d);
         alpha = input.color.a * intensity * body * body * (1.0 - progress);
         sourceMix = 0.18;
+    } else if (inKind(kind, 7.0)) {
+        let outer = 1.0 - smoothstep(0.018, 0.052, abs(d - 0.82));
+        let inner = 1.0 - smoothstep(0.018, 0.048, abs(d - 0.46));
+        let horizontal = (1.0 - smoothstep(0.012, 0.032, abs(input.local.y))) * smoothstep(0.42, 0.56, abs(input.local.x)) * (1.0 - smoothstep(0.92, 1.08, abs(input.local.x)));
+        let vertical = (1.0 - smoothstep(0.012, 0.032, abs(input.local.x))) * smoothstep(0.42, 0.56, abs(input.local.y)) * (1.0 - smoothstep(0.92, 1.08, abs(input.local.y)));
+        let sweepDirection = vec2f(cos(uniforms.time * 2.8 + seed), sin(uniforms.time * 2.8 + seed));
+        let localDirection = normalize(input.local + vec2f(0.0001, 0.0001));
+        let sweep = smoothstep(0.976, 1.0, dot(localDirection, sweepDirection)) * smoothstep(0.12, 0.86, d);
+        alpha = input.color.a * intensity * clamp(outer + inner * 0.62 + horizontal * 0.52 + vertical * 0.52 + sweep * 0.5, 0.0, 1.15);
+        color = mix(vec3f(0.46, 0.84, 1.0), vec3f(1.0, 0.98, 0.78), outer * 0.35 + sweep * 0.3);
     } else if (inKind(kind, 2.0)) {
         let body = smoothstep(1.02, 0.16, d);
         let boundary = 1.0 - smoothstep(0.025, 0.12, abs(d - (0.78 + sin(uniforms.time * 1.7 + seed) * 0.025)));

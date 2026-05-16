@@ -79,7 +79,8 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
         bool shieldHit,
         bool healthHit,
         bool reducedMotion,
-        string phase)
+        string phase,
+        bool patriotOverlayEnabled = true)
     {
         if (_module is null) return _stats;
 
@@ -87,7 +88,7 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
         {
             _stats = await _module.InvokeAsync<WebGpuEffectsStats>(
                     "spawnShotEffects",
-                    BuildShotPayload(resolution, wind, terrainRevision, shieldHit, healthHit, reducedMotion, phase))
+                    BuildShotPayload(resolution, wind, terrainRevision, shieldHit, healthHit, reducedMotion, phase, patriotOverlayEnabled))
                 ?? _stats;
         }
         catch (JSException ex)
@@ -159,7 +160,8 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
         bool shieldHit,
         bool healthHit,
         bool reducedMotion,
-        string phase) =>
+        string phase,
+        bool patriotOverlayEnabled) =>
         new
         {
             resolution.WeaponId,
@@ -177,7 +179,8 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
             ShieldHit = shieldHit,
             HealthHit = healthHit,
             ReducedMotion = reducedMotion,
-            Phase = phase
+            Phase = phase,
+            PatriotOverlayEnabled = patriotOverlayEnabled
         };
 
     private static object BuildTerrainPayload(

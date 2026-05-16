@@ -45,7 +45,7 @@ public sealed class WasmCanvasRenderer(IJSRuntime js, WasmRenderCommandBuilder c
         return _stats;
     }
 
-    public async ValueTask PlayShotAsync(RenderScene scene, ShotResolution resolution, bool screenShake)
+    public async ValueTask PlayShotAsync(RenderScene scene, ShotResolution resolution, bool screenShake, bool suppressCanvasPatriotCountermeasure = false)
     {
         if (_module is null) return;
 
