@@ -1,20 +1,32 @@
+let sourceCanvas;
 let canvas;
 let adapter;
 let device;
 let context;
 let format;
 let particleBuffer;
+let radialBuffer;
 let uniformBuffer;
 let computePipeline;
 let renderPipeline;
+let postProcessPipeline;
 let computeBindGroup;
 let renderBindGroup;
+let postProcessBindGroup;
+let sourceTexture;
+let sourceSampler;
+let sourceTextureWidth = 0;
+let sourceTextureHeight = 0;
 let rafId = 0;
 let lastFrame = 0;
 let frameMs = 0;
+let postProcessMs = 0;
+let sourceCopyMs = 0;
 let supported = false;
 let enabled = false;
 let fallbackReason = "Not initialized";
+let sourceCopySupported = true;
+let sourceCopyReady = false;
 let currentScene;
 let currentWorld = { width: 1200, height: 700 };
 let currentWeather = { type: "clear", intensity: 0 };
@@ -22,19 +34,32 @@ let currentWind = 0;
 let terrainCache = [];
 let reducedMotion = false;
 let ambientAccumulator = 0;
+let qualityTier = "high";
 let qualityScale = 1;
+let qualityLevel = 2;
+let qualityDebt = 0;
+let qualityCredit = 0;
 let writeIndex = 0;
+let radialWriteIndex = 0;
 let spawnCount = 0;
 let scheduledImpactId = 0;
+let activeRadialCount = 0;
 
 const maxParticles = 6000;
 const particleFloats = 12;
 const particleStride = particleFloats * 4;
+const maxRadialEffects = 96;
+const persistentRadialSlots = 24;
+const radialFloats = 16;
+const radialStride = radialFloats * 4;
 const workgroupSize = 64;
 const gravity = 170;
 const particleData = new Float32Array(maxParticles * particleFloats);
 const expirations = new Float64Array(maxParticles);
-const uniformData = new Float32Array(8);
+const radialData = new Float32Array(maxRadialEffects * radialFloats);
+const radialExpirations = new Float64Array(maxRadialEffects);
+const radialStartedAt = new Float64Array(maxRadialEffects);
+const uniformData = new Float32Array(12);
 
 const kinds = {
     spark: 0,
@@ -51,9 +76,144 @@ const kinds = {
     plasma: 11
 };
 
-export async function initialize(element, options = {}) {
-    canvas = element;
+const radialKinds = {
+    shockwave: 0,
+    flash: 1,
+    radiation: 2,
+    heat: 3,
+    dust: 4,
+    lava: 5,
+    glow: 6
+};
+
+const qualityProfiles = {
+    high: { scale: 1, level: 2, ambient: 1, distortion: 1 },
+    balanced: { scale: 0.68, level: 1, ambient: 0.72, distortion: 0.72 },
+    low: { scale: 0.42, level: 0, ambient: 0.45, distortion: 0.35 }
+};
+
+const explosionPresets = {
+    ballistic: {
+        debrisScale: 1,
+        smokeScale: 0.72,
+        sparkScale: 0.8,
+        heatScale: 0,
+        glowScale: 0.6,
+        debrisColor: [0.72, 0.49, 0.25],
+        smokeColor: [0.38, 0.34, 0.28],
+        flashColor: [1, 0.72, 0.28, 0.42],
+        shockColor: [1, 0.78, 0.38, 0.48],
+        debrisKind: kinds.debris,
+        smokeKind: kinds.smoke
+    },
+    missile: {
+        debrisScale: 0.82,
+        smokeScale: 1.1,
+        sparkScale: 1.1,
+        heatScale: 0.3,
+        glowScale: 0.75,
+        debrisColor: [0.82, 0.58, 0.28],
+        smokeColor: [0.43, 0.39, 0.32],
+        flashColor: [1, 0.76, 0.32, 0.5],
+        shockColor: [0.96, 0.72, 0.34, 0.52],
+        debrisKind: kinds.debris,
+        smokeKind: kinds.smoke
+    },
+    penetrator: {
+        debrisScale: 1.25,
+        smokeScale: 1.35,
+        sparkScale: 0.52,
+        heatScale: 0.1,
+        glowScale: 0.28,
+        debrisColor: [0.56, 0.43, 0.28],
+        smokeColor: [0.36, 0.32, 0.26],
+        flashColor: [0.94, 0.72, 0.42, 0.3],
+        shockColor: [0.78, 0.62, 0.46, 0.38],
+        debrisKind: kinds.debris,
+        smokeKind: kinds.smoke
+    },
+    dirt: {
+        debrisScale: 1.45,
+        smokeScale: 0.9,
+        sparkScale: 0.08,
+        heatScale: 0,
+        glowScale: 0.18,
+        debrisColor: [0.5, 0.39, 0.24],
+        smokeColor: [0.62, 0.52, 0.36],
+        flashColor: [0.86, 0.68, 0.42, 0.22],
+        shockColor: [0.7, 0.58, 0.42, 0.28],
+        debrisKind: kinds.debris,
+        smokeKind: kinds.smoke
+    },
+    lava: {
+        debrisScale: 0.65,
+        smokeScale: 1,
+        sparkScale: 1.45,
+        heatScale: 1.35,
+        glowScale: 1.2,
+        debrisColor: [1, 0.34, 0.08],
+        smokeColor: [0.38, 0.26, 0.2],
+        flashColor: [1, 0.44, 0.08, 0.58],
+        shockColor: [1, 0.36, 0.08, 0.55],
+        debrisKind: kinds.ember,
+        smokeKind: kinds.smoke
+    },
+    laser: {
+        debrisScale: 0.1,
+        smokeScale: 0.25,
+        sparkScale: 1.6,
+        heatScale: 0.45,
+        glowScale: 1.15,
+        debrisColor: [1, 0.26, 0.42],
+        smokeColor: [0.46, 0.28, 0.34],
+        flashColor: [1, 0.18, 0.34, 0.62],
+        shockColor: [0.96, 0.28, 0.62, 0.52],
+        debrisKind: kinds.plasma,
+        smokeKind: kinds.heat
+    },
+    drone: {
+        debrisScale: 0.55,
+        smokeScale: 1.2,
+        sparkScale: 0.72,
+        heatScale: 0.24,
+        glowScale: 0.42,
+        debrisColor: [0.9, 0.68, 0.38],
+        smokeColor: [0.48, 0.48, 0.42],
+        flashColor: [1, 0.78, 0.38, 0.36],
+        shockColor: [0.86, 0.78, 0.64, 0.34],
+        debrisKind: kinds.debris,
+        smokeKind: kinds.smoke
+    },
+    nuclear: {
+        debrisScale: 1.6,
+        smokeScale: 1.75,
+        sparkScale: 1.4,
+        heatScale: 0.8,
+        glowScale: 1.8,
+        debrisColor: [0.78, 0.62, 0.38],
+        smokeColor: [0.42, 0.37, 0.29],
+        flashColor: [1, 0.94, 0.66, 0.78],
+        shockColor: [1, 0.9, 0.58, 0.7],
+        debrisKind: kinds.debris,
+        smokeKind: kinds.smoke
+    }
+};
+
+export async function initialize(baseElement, overlayElement, options = {}) {
+    if (overlayElement && typeof overlayElement.getContext === "function") {
+        sourceCanvas = baseElement;
+        canvas = overlayElement;
+    } else {
+        sourceCanvas = undefined;
+        canvas = baseElement;
+        options = overlayElement ?? {};
+    }
+
     fallbackReason = "";
+    sourceCopySupported = true;
+    sourceCopyReady = false;
+    postProcessMs = 0;
+    sourceCopyMs = 0;
 
     if (!options.enabled) {
         enabled = false;
@@ -120,13 +280,14 @@ export async function setEnabled(value) {
         enabled = false;
         fallbackReason = "Disabled";
         clearScheduledImpact();
+        clearCpuState();
         clearOverlay();
         stopLoop();
         return getStats();
     }
 
     if (!canvas || !device || !context) {
-        return await initialize(canvas, { enabled: true });
+        return await initialize(sourceCanvas ?? canvas, canvas, { enabled: true });
     }
 
     enabled = supported;
@@ -144,6 +305,7 @@ export function setScene(scene, terrainRevision, options = {}) {
     if (scene?.terrain?.length) {
         terrainCache = Array.from(scene.terrain);
     }
+    syncRadiationZones(scene?.radiation ?? []);
 
     if (enabled) startLoop();
     return getStats();
@@ -174,16 +336,37 @@ export function spawnTerrainEffects(payload) {
         const radius = Math.max(16, Number(explosion.terrainRadius ?? explosion.radius ?? 40));
         const centerY = Number(explosion.y ?? surfaceY(x));
         const surface = Math.min(centerY, surfaceY(x));
-        const count = scaledCount(radius * 1.1, 24, 110);
+        const preset = resolveExplosionPreset(explosion, payload);
+        const rimCount = scaledCount(radius * 0.62, 14, 72);
+        for (let i = 0; i < rimCount; i++) {
+            const side = i % 2 === 0 ? -1 : 1;
+            const distance = radius * randomBetween(0.68, 1.22) * side;
+            const px = x + distance + randomBetween(-radius * 0.18, radius * 0.18);
+            const py = surfaceY(px);
+            const slope = surfaceY(px + 4) - surfaceY(px - 4);
+            const lift = clamp(Math.abs(slope) / 18, 0.25, 1.4);
+            const vx = wind * 0.85 + side * randomBetween(18, 86) - slope * randomBetween(1.2, 2.6);
+            const vy = randomBetween(-110, -22) * lift;
+            const color = preset.debrisColor;
+            spawnParticle(px, py - randomBetween(0, 6), vx, vy, color[0], color[1], color[2], randomBetween(0.38, 0.66), randomBetween(3.5, 9), randomBetween(0.75, 1.7), kinds.debris);
+            if (i % 2 === 0) {
+                const smoke = preset.smokeColor;
+                spawnParticle(px, py - randomBetween(0, 12), wind * 1.35 + randomBetween(-20, 20), randomBetween(-40, -6), smoke[0], smoke[1], smoke[2], 0.22, randomBetween(16, 36), randomBetween(1.2, 2.8), kinds.smoke);
+            }
+        }
+
+        const count = scaledCount(radius * 0.48, 8, 54);
         for (let i = 0; i < count; i++) {
             const t = randomBetween(-1, 1);
             const px = x + t * radius * randomBetween(0.25, 1.05);
             const py = Math.min(surfaceY(px), surface + randomBetween(-12, 22));
             const vx = wind * 0.85 + t * randomBetween(16, 76);
             const vy = randomBetween(-112, -22);
-            spawnParticle(px, py, vx, vy, 0.56, 0.42, 0.25, 0.46, randomBetween(4, 10), randomBetween(0.85, 1.8), kinds.debris);
+            const color = preset.debrisColor;
+            spawnParticle(px, py, vx, vy, color[0], color[1], color[2], 0.46, randomBetween(4, 10), randomBetween(0.85, 1.8), kinds.debris);
             if (i % 3 === 0) {
-                spawnParticle(px, py, wind * 1.1 + randomBetween(-18, 18), randomBetween(-38, -8), 0.74, 0.61, 0.42, 0.26, randomBetween(12, 30), randomBetween(1.1, 2.4), kinds.smoke);
+                const smoke = preset.smokeColor;
+                spawnParticle(px, py, wind * 1.1 + randomBetween(-18, 18), randomBetween(-38, -8), smoke[0], smoke[1], smoke[2], 0.26, randomBetween(12, 30), randomBetween(1.1, 2.4), kinds.smoke);
             }
         }
     }
@@ -196,8 +379,12 @@ export function getStats() {
         supported,
         enabled,
         frameMs,
+        postProcessMs,
+        sourceCopyMs,
         particleCount: estimateParticleCount(),
+        radialEffectCount: estimateRadialEffectCount(),
         spawnCount,
+        qualityTier,
         fallbackReason: fallbackReason ?? ""
     };
 }
@@ -207,13 +394,20 @@ export function dispose() {
     clearScheduledImpact();
     clearCpuState();
     if (particleBuffer) particleBuffer.destroy();
+    if (radialBuffer) radialBuffer.destroy();
     if (uniformBuffer) uniformBuffer.destroy();
+    if (sourceTexture) sourceTexture.destroy();
     particleBuffer = undefined;
+    radialBuffer = undefined;
     uniformBuffer = undefined;
+    sourceTexture = undefined;
+    sourceSampler = undefined;
     computePipeline = undefined;
     renderPipeline = undefined;
+    postProcessPipeline = undefined;
     computeBindGroup = undefined;
     renderBindGroup = undefined;
+    postProcessBindGroup = undefined;
     enabled = false;
 }
 
@@ -230,10 +424,23 @@ function createResources() {
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
     });
 
+    radialBuffer = device.createBuffer({
+        size: maxRadialEffects * radialStride,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+    });
+
     uniformBuffer = device.createBuffer({
         size: uniformData.byteLength,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
+
+    sourceSampler = device.createSampler({
+        magFilter: "linear",
+        minFilter: "linear",
+        addressModeU: "clamp-to-edge",
+        addressModeV: "clamp-to-edge"
+    });
+    createOrResizeSourceTexture();
 
     const computeModule = device.createShaderModule({ code: computeShader });
     computePipeline = device.createComputePipeline({
@@ -283,6 +490,35 @@ function createResources() {
         ]
     });
 
+    const postProcessModule = device.createShaderModule({ code: postProcessShader });
+    postProcessPipeline = device.createRenderPipeline({
+        layout: "auto",
+        vertex: { module: postProcessModule, entryPoint: "vertexMain" },
+        fragment: {
+            module: postProcessModule,
+            entryPoint: "fragmentMain",
+            targets: [
+                {
+                    format,
+                    blend: {
+                        color: {
+                            srcFactor: "one",
+                            dstFactor: "one-minus-src-alpha",
+                            operation: "add"
+                        },
+                        alpha: {
+                            srcFactor: "one",
+                            dstFactor: "one-minus-src-alpha",
+                            operation: "add"
+                        }
+                    }
+                }
+            ]
+        },
+        primitive: { topology: "triangle-list" }
+    });
+    createPostProcessBindGroup();
+
     clearCpuState();
 }
 
@@ -314,6 +550,8 @@ function frame(now) {
     const started = performance.now();
     resizeCanvas();
     emitAmbient(dt, now);
+    const radialCount = updateRadialAges(now);
+    copySourceCanvasIfNeeded(radialCount);
     updateUniforms(dt, now);
 
     const encoder = device.createCommandEncoder();
@@ -333,6 +571,13 @@ function frame(now) {
             }
         ]
     });
+    const postStarted = performance.now();
+    if (postProcessPipeline && postProcessBindGroup && radialCount > 0) {
+        renderPass.setPipeline(postProcessPipeline);
+        renderPass.setBindGroup(0, postProcessBindGroup);
+        renderPass.draw(6, maxRadialEffects);
+    }
+    postProcessMs = performance.now() - postStarted;
     renderPass.setPipeline(renderPipeline);
     renderPass.setBindGroup(0, renderBindGroup);
     renderPass.draw(6, maxParticles);
@@ -340,7 +585,7 @@ function frame(now) {
 
     device.queue.submit([encoder.finish()]);
     frameMs = performance.now() - started;
-    qualityScale = frameMs > 22 ? Math.max(0.35, qualityScale * 0.96) : Math.min(1, qualityScale + 0.006);
+    updateQualityTier();
     rafId = requestAnimationFrame(frame);
 }
 
@@ -373,7 +618,40 @@ function resizeCanvas() {
     if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
+        createOrResizeSourceTexture();
     }
+}
+
+function createOrResizeSourceTexture() {
+    if (!device || !canvas || canvas.width <= 0 || canvas.height <= 0) return;
+
+    if (sourceTexture && sourceTextureWidth === canvas.width && sourceTextureHeight === canvas.height) {
+        return;
+    }
+
+    if (sourceTexture) sourceTexture.destroy();
+    sourceTextureWidth = canvas.width;
+    sourceTextureHeight = canvas.height;
+    sourceTexture = device.createTexture({
+        size: { width: sourceTextureWidth, height: sourceTextureHeight, depthOrArrayLayers: 1 },
+        format: "rgba8unorm",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    });
+    createPostProcessBindGroup();
+}
+
+function createPostProcessBindGroup() {
+    if (!device || !postProcessPipeline || !radialBuffer || !uniformBuffer || !sourceTexture || !sourceSampler) return;
+
+    postProcessBindGroup = device.createBindGroup({
+        layout: postProcessPipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: radialBuffer } },
+            { binding: 1, resource: { buffer: uniformBuffer } },
+            { binding: 2, resource: sourceTexture.createView() },
+            { binding: 3, resource: sourceSampler }
+        ]
+    });
 }
 
 function updateUniforms(dt, now) {
@@ -385,7 +663,42 @@ function updateUniforms(dt, now) {
     uniformData[5] = canvas.height;
     uniformData[6] = Number(currentWorld?.width ?? 1200);
     uniformData[7] = Number(currentWorld?.height ?? 700);
+    uniformData[8] = sourceCopyReady ? 1 : 0;
+    uniformData[9] = qualityLevel;
+    uniformData[10] = activeRadialCount;
+    uniformData[11] = 0;
     device.queue.writeBuffer(uniformBuffer, 0, uniformData);
+}
+
+function copySourceCanvasIfNeeded(radialCount) {
+    sourceCopyReady = false;
+    sourceCopyMs = 0;
+    if (!radialCount || !sourceCanvas || !sourceTexture || !sourceCopySupported || qualityTier === "low") {
+        return;
+    }
+
+    if (!hasSourceSamplingRadials()) return;
+
+    const width = Math.min(sourceTextureWidth, Number(sourceCanvas.width ?? sourceTextureWidth));
+    const height = Math.min(sourceTextureHeight, Number(sourceCanvas.height ?? sourceTextureHeight));
+    if (width <= 0 || height <= 0) return;
+
+    const started = performance.now();
+    try {
+        device.queue.copyExternalImageToTexture(
+            { source: sourceCanvas },
+            { texture: sourceTexture },
+            { width, height }
+        );
+        sourceCopyReady = true;
+        sourceCopyMs = performance.now() - started;
+    } catch (error) {
+        sourceCopyReady = false;
+        sourceCopySupported = false;
+        sourceCopyMs = 0;
+        fallbackReason = "Canvas copy fallback";
+        console.debug?.("WebGPU source canvas copy disabled", error);
+    }
 }
 
 function spawnFlightEffects(payload) {
@@ -470,66 +783,235 @@ function spawnExplosion(explosion, payload, wind) {
     const y = Number(explosion.y ?? 0);
     const radius = Math.max(12, Number(explosion.radius ?? 36));
     const terrainRadius = Math.max(radius * 0.6, Number(explosion.terrainRadius ?? radius));
-    const visual = normalized(explosion.visualKind ?? payload?.visualKind ?? payload?.weaponId);
-    const nuclear = Boolean(explosion.nuclear) || visual.includes("nuclear");
-    const lava = visual.includes("lava") || visual.includes("fire") || visual.includes("napalm");
-    const laser = visual.includes("laser");
-    const dirt = Boolean(explosion.dirt) || visual.includes("dirt") || visual.includes("excavator");
-    const penetrator = visual.includes("penetrator") || visual.includes("mop") || visual.includes("bunker");
+    const preset = resolveExplosionPreset(explosion, payload);
+    const nuclear = preset === explosionPresets.nuclear;
+    const doomsday = isDoomsdayExplosion(explosion, payload, radius);
+    const lava = preset === explosionPresets.lava;
+    const laser = preset === explosionPresets.laser;
+    const penetrator = preset === explosionPresets.penetrator;
+    const nukeBoost = doomsday ? 1.32 : 1;
 
-    spawnParticle(x, y, 0, 0, nuclear ? 1 : 0.95, nuclear ? 0.9 : 0.78, nuclear ? 0.46 : 0.3, nuclear ? 0.52 : 0.38, radius * (nuclear ? 2.3 : 1.4), nuclear ? 0.72 : 0.48, kinds.flash);
-    spawnParticle(x, y, 0, 0, nuclear ? 1 : 0.96, nuclear ? 0.78 : 0.65, nuclear ? 0.32 : 0.22, nuclear ? 0.78 : 0.58, radius * 0.95, nuclear ? 1.25 : 0.75, kinds.shockwave);
+    spawnParticle(x, y, 0, 0, preset.flashColor[0], preset.flashColor[1], preset.flashColor[2], preset.flashColor[3], radius * (nuclear ? 3.35 * nukeBoost : 1.35), nuclear ? 1.05 : 0.48, kinds.flash);
+    spawnParticle(x, y, 0, 0, preset.shockColor[0], preset.shockColor[1], preset.shockColor[2], preset.shockColor[3], radius * (nuclear ? 2.05 * nukeBoost : 0.98), nuclear ? 1.65 : 0.75, kinds.shockwave);
+
+    spawnExplosionRadials(x, y, radius, terrainRadius, wind, preset, { nuclear, doomsday, lava, laser, penetrator });
+    spawnExplosionDebris(x, y, radius, terrainRadius, wind, preset, { nuclear, doomsday, lava, laser, penetrator });
+    spawnExplosionSmoke(x, y, radius, terrainRadius, wind, preset, { nuclear, doomsday, lava, penetrator });
+
     if (nuclear) {
-        spawnParticle(x, y, 0, 0, 1, 0.92, 0.62, 0.52, radius * 1.75, 1.6, kinds.shockwave);
+        spawnNuclearColumn(x, y, radius, terrainRadius, wind, preset, doomsday);
+    } else if (lava) {
+        spawnLavaBurst(x, y, radius, wind);
+    } else if (laser) {
+        spawnLaserPlasma(x, y, radius, wind);
+    }
+}
+
+function resolveExplosionPreset(explosion, payload) {
+    const visual = explosionIdentity(explosion, payload);
+    if (Boolean(explosion?.nuclear) || visual.includes("nuclear") || visual.includes("nuke") || visual.includes("doomsday")) {
+        return explosionPresets.nuclear;
     }
 
-    const debrisCount = scaledCount(nuclear ? radius * 1.5 : radius, 18, nuclear ? 220 : 120);
-    for (let i = 0; i < debrisCount; i++) {
-        const angle = randomBetween(-Math.PI, Math.PI);
-        const speed = randomBetween(radius * 0.7, radius * (nuclear ? 3.2 : 2.1));
-        const upward = Math.sin(angle) < 0 ? 1.15 : 0.72;
-        const vx = Math.cos(angle) * speed + wind * randomBetween(0.2, 1.1);
-        const vy = Math.sin(angle) * speed * upward - randomBetween(22, nuclear ? 160 : 80);
-        const color = dirt ? [0.54, 0.42, 0.25] : penetrator ? [0.62, 0.48, 0.34] : [0.82, 0.55, 0.24];
-        spawnParticle(x, y, vx, vy, color[0], color[1], color[2], randomBetween(0.42, 0.78), randomBetween(3, nuclear ? 12 : 9), randomBetween(0.65, nuclear ? 2.2 : 1.45), kinds.debris);
+    if (visual.includes("lava") || visual.includes("fire") || visual.includes("napalm")) {
+        return explosionPresets.lava;
     }
 
-    const smokeCount = scaledCount(radius * (nuclear ? 1.4 : 0.7), 10, nuclear ? 130 : 70);
-    for (let i = 0; i < smokeCount; i++) {
+    if (visual.includes("laser")) {
+        return explosionPresets.laser;
+    }
+
+    if (visual.includes("drone") || visual.includes("shahed")) {
+        return explosionPresets.drone;
+    }
+
+    if (Boolean(explosion?.dirt) || visual.includes("dirt") || visual.includes("excavator")) {
+        return explosionPresets.dirt;
+    }
+
+    if (visual.includes("penetrator") || visual.includes("mop") || visual.includes("bunker") || visual.includes("gbu")) {
+        return explosionPresets.penetrator;
+    }
+
+    if (visual.includes("missile") || visual.includes("dark") || visual.includes("eagle")) {
+        return explosionPresets.missile;
+    }
+
+    return explosionPresets.ballistic;
+}
+
+function explosionIdentity(explosion, payload) {
+    return normalized(`${explosion?.visualKind ?? ""} ${payload?.visualKind ?? ""} ${payload?.weaponId ?? ""}`);
+}
+
+function isDoomsdayExplosion(explosion, payload, radius) {
+    const visual = explosionIdentity(explosion, payload);
+    return visual.includes("doomsday") || Number(radius ?? explosion?.radius ?? 0) >= 165;
+}
+
+function spawnExplosionRadials(x, y, radius, terrainRadius, wind, preset, flags) {
+    if (reducedMotion && !flags.nuclear) return;
+
+    const glow = preset.glowScale;
+    if (flags.nuclear) {
+        const boost = flags.doomsday ? 1.35 : 1;
+        const motionScale = reducedMotion ? 0.62 : 1;
+        const worldWidth = Number(currentWorld?.width ?? 1200);
+        const worldHeight = Number(currentWorld?.height ?? 700);
+        const screenRadius = Math.max(worldWidth, worldHeight) * (flags.doomsday ? 1.18 : 0.92);
+        spawnRadialEffect(worldWidth * 0.5, worldHeight * 0.48, screenRadius, 0.46 * motionScale, radialKinds.flash, 1.65 * glow * boost, [1, 0.96, 0.76, flags.doomsday ? 0.54 : 0.38], { wind: 0, softness: 0.92, seed: randomBetween(0, 1000) });
+        spawnRadialEffect(x, y, radius * 2.25 * boost, 0.62 * motionScale, radialKinds.flash, 1.4 * glow * boost, [1, 0.95, 0.66, 0.74], { wind, softness: 0.52, seed: randomBetween(0, 1000) });
+        spawnRadialEffect(x, y, radius * 3.55 * boost, 0.95 * motionScale, radialKinds.shockwave, 1.55 * glow * boost, [1, 0.92, 0.58, 0.74], { wind, softness: 0.16, seed: randomBetween(0, 1000) });
+        spawnRadialEffect(x, y, radius * 5.25 * boost, 1.6 * motionScale, radialKinds.shockwave, 1.25 * glow * boost, [0.98, 0.82, 0.44, 0.56], { wind, softness: 0.18, seed: randomBetween(0, 1000) });
+        spawnRadialEffect(x, y, radius * 4.65 * boost, 4.8 * motionScale, radialKinds.dust, 0.98 * boost, [0.62, 0.52, 0.37, flags.doomsday ? 0.46 : 0.36], { wind, softness: 0.48, aspect: 1.2, seed: randomBetween(0, 1000) });
+        spawnRadialEffect(x, y, radius * 3.15 * boost, 7.2 * motionScale, radialKinds.radiation, 0.66 * boost, [0.72, 1, 0.3, flags.doomsday ? 0.32 : 0.22], { wind, softness: 0.6, aspect: 1.34, seed: randomBetween(0, 1000) });
+        return;
+    }
+
+    spawnRadialEffect(x, y, radius * (flags.laser ? 1.6 : 2.1), flags.laser ? 0.38 : 0.62, radialKinds.flash, 0.45 * glow, preset.flashColor, { wind, softness: 0.42, seed: randomBetween(0, 1000) });
+
+    if (flags.lava) {
+        spawnRadialEffect(x, y, terrainRadius * 1.65, 2.4, radialKinds.heat, 0.7 * glow, [1, 0.42, 0.08, 0.32], { wind, softness: 0.5, aspect: 1.22, seed: randomBetween(0, 1000) });
+    } else if (!flags.laser) {
+        spawnRadialEffect(x, y, radius * 2.7, 0.72, radialKinds.shockwave, 0.42 * glow, preset.shockColor, { wind, softness: 0.2, seed: randomBetween(0, 1000) });
+    }
+}
+
+function spawnExplosionDebris(x, y, radius, terrainRadius, wind, preset, flags) {
+    if (flags.laser) return;
+
+    const nuclearBoost = flags.doomsday ? 1.34 : 1;
+    const count = scaledCount(radius * preset.debrisScale * (flags.nuclear ? 1.45 * nuclearBoost : 1), 8, flags.nuclear ? (flags.doomsday ? 340 : 240) : 130);
+    for (let i = 0; i < count; i++) {
         const angle = randomBetween(-Math.PI, Math.PI);
-        const speed = randomBetween(6, radius * 0.7);
+        const speed = randomBetween(radius * 0.65, radius * (flags.nuclear ? 3.35 : flags.penetrator ? 2.45 : 2.05));
+        const upward = Math.sin(angle) < 0 ? 1.2 : 0.72;
+        const vx = Math.cos(angle) * speed + wind * randomBetween(0.15, flags.nuclear ? 1.25 : 0.9);
+        const vy = Math.sin(angle) * speed * upward - randomBetween(18, flags.nuclear ? 175 : 80);
+        const color = preset.debrisColor;
+        const kind = flags.lava && Math.random() < 0.62 ? kinds.ember : preset.debrisKind;
+        spawnParticle(x, y, vx, vy, color[0], color[1], color[2], randomBetween(0.38, 0.78), randomBetween(3, flags.nuclear ? 13 : 9), randomBetween(0.58, flags.nuclear ? 2.3 : 1.55), kind);
+    }
+
+    const rimSamples = scaledCount(terrainRadius * (flags.doomsday ? 0.46 : 0.34), 8, flags.nuclear ? (flags.doomsday ? 112 : 72) : 38);
+    for (let i = 0; i < rimSamples; i++) {
+        const side = i % 2 === 0 ? -1 : 1;
+        const px = x + side * randomBetween(terrainRadius * 0.42, terrainRadius * 1.12);
+        const py = surfaceY(px);
+        const slope = surfaceY(px + 4) - surfaceY(px - 4);
+        const color = preset.debrisColor;
         spawnParticle(
-            x + Math.cos(angle) * randomBetween(0, terrainRadius * 0.35),
-            y + Math.sin(angle) * randomBetween(0, terrainRadius * 0.2),
-            Math.cos(angle) * speed + wind * randomBetween(0.5, 1.7),
-            Math.sin(angle) * speed - randomBetween(10, nuclear ? 90 : 42),
-            nuclear ? 0.44 : 0.37,
-            nuclear ? 0.38 : 0.34,
-            nuclear ? 0.3 : 0.27,
-            randomBetween(0.14, 0.34),
-            randomBetween(18, nuclear ? 72 : 42),
-            randomBetween(1.2, nuclear ? 4.6 : 2.7),
+            px,
+            py - randomBetween(0, 5),
+            wind * randomBetween(0.5, 1.2) + side * randomBetween(18, 92) - slope * randomBetween(1.2, 2.8),
+            randomBetween(-92, -12),
+            color[0],
+            color[1],
+            color[2],
+            randomBetween(0.32, 0.58),
+            randomBetween(3, flags.nuclear ? 10 : 7),
+            randomBetween(0.75, flags.nuclear ? 2.1 : 1.45),
+            kinds.debris);
+    }
+}
+
+function spawnExplosionSmoke(x, y, radius, terrainRadius, wind, preset, flags) {
+    const nuclearBoost = flags.doomsday ? 1.32 : 1;
+    const count = scaledCount(radius * preset.smokeScale * (flags.nuclear ? 1.35 * nuclearBoost : 0.82), 8, flags.nuclear ? (flags.doomsday ? 260 : 180) : 84);
+    const smoke = preset.smokeColor;
+    for (let i = 0; i < count; i++) {
+        const angle = randomBetween(-Math.PI, Math.PI);
+        const distance = randomBetween(0, terrainRadius * (flags.nuclear ? 0.45 : 0.32));
+        const speed = randomBetween(5, radius * (flags.nuclear ? 0.85 : 0.62));
+        const alpha = flags.nuclear ? randomBetween(0.2, flags.doomsday ? 0.5 : 0.4) : randomBetween(0.12, 0.31);
+        spawnParticle(
+            x + Math.cos(angle) * distance,
+            y + Math.sin(angle) * distance * 0.56,
+            Math.cos(angle) * speed + wind * randomBetween(0.55, flags.nuclear ? 2.1 : 1.55),
+            Math.sin(angle) * speed - randomBetween(10, flags.nuclear ? 108 : 44),
+            smoke[0],
+            smoke[1],
+            smoke[2],
+            alpha,
+            randomBetween(18, flags.nuclear ? (flags.doomsday ? 108 : 88) : 44),
+            randomBetween(1.15, flags.nuclear ? (flags.doomsday ? 6.4 : 5.2) : 2.8),
+            preset.smokeKind);
+    }
+}
+
+function spawnNuclearColumn(x, y, radius, terrainRadius, wind, preset, doomsday) {
+    const boost = doomsday ? 1.34 : 1;
+    const stemCount = scaledCount(radius * 0.95 * boost, 18, doomsday ? 175 : 120);
+    const smoke = preset.smokeColor;
+    for (let i = 0; i < stemCount; i++) {
+        const rise = randomBetween(0, radius * (doomsday ? 3.2 : 2.5));
+        const spread = randomBetween(4, radius * 0.28 + rise * 0.08);
+        spawnParticle(
+            x + randomBetween(-spread, spread),
+            y - rise * randomBetween(0.12, 0.34),
+            wind * randomBetween(0.35, 1.25) + randomBetween(-12, 12),
+            -randomBetween(38, doomsday ? 162 : 132),
+            smoke[0],
+            smoke[1],
+            smoke[2],
+            randomBetween(0.2, doomsday ? 0.42 : 0.34),
+            randomBetween(34, doomsday ? 118 : 94),
+            randomBetween(2.5, doomsday ? 7.4 : 6.2),
             kinds.smoke);
     }
 
-    if (lava) {
-        for (let i = 0; i < scaledCount(radius, 20, 140); i++) {
-            const angle = randomBetween(-Math.PI, 0);
-            const speed = randomBetween(18, radius * 1.7);
-            spawnParticle(x, y, Math.cos(angle) * speed + wind * 0.6, Math.sin(angle) * speed - randomBetween(18, 96), 1, randomBetween(0.25, 0.62), 0.08, randomBetween(0.46, 0.82), randomBetween(3, 9), randomBetween(0.65, 1.9), kinds.ember);
-        }
-
-        for (let i = 0; i < scaledCount(radius * 0.45, 8, 36); i++) {
-            spawnParticle(x + randomBetween(-radius, radius), y + randomBetween(-radius * 0.2, radius * 0.35), wind * 0.2 + randomBetween(-6, 6), randomBetween(-12, 2), 1, 0.36, 0.12, 0.16, randomBetween(22, 56), randomBetween(0.8, 1.8), kinds.heat);
-        }
+    const capCount = scaledCount(radius * 0.95 * boost, 16, doomsday ? 160 : 105);
+    for (let i = 0; i < capCount; i++) {
+        const angle = randomBetween(-Math.PI, Math.PI);
+        const distance = randomBetween(radius * 0.25, radius * (doomsday ? 1.75 : 1.35));
+        spawnParticle(
+            x + Math.cos(angle) * distance,
+            y - terrainRadius * randomBetween(0.9, doomsday ? 2.15 : 1.7) + Math.sin(angle) * radius * 0.24,
+            Math.cos(angle) * randomBetween(18, doomsday ? 96 : 74) + wind * randomBetween(0.8, 2.5),
+            randomBetween(-38, 16),
+            0.42,
+            0.38,
+            0.31,
+            randomBetween(0.16, doomsday ? 0.36 : 0.28),
+            randomBetween(38, doomsday ? 128 : 96),
+            randomBetween(2.6, doomsday ? 7.2 : 6.5),
+            kinds.smoke);
     }
 
-    if (laser) {
-        for (let i = 0; i < scaledCount(radius * 1.2, 14, 90); i++) {
-            const angle = randomBetween(-Math.PI, Math.PI);
-            const speed = randomBetween(40, 220);
-            spawnParticle(x, y, Math.cos(angle) * speed + wind * 0.25, Math.sin(angle) * speed, 1, randomBetween(0.2, 0.4), randomBetween(0.32, 0.68), randomBetween(0.48, 0.86), randomBetween(2, 7), randomBetween(0.22, 0.75), kinds.plasma);
-        }
+    const ashCount = scaledCount(radius * 0.9 * boost, 18, doomsday ? 145 : 90);
+    for (let i = 0; i < ashCount; i++) {
+        spawnParticle(
+            x + randomBetween(-radius * (doomsday ? 4.4 : 3.2), radius * (doomsday ? 4.4 : 3.2)),
+            y - randomBetween(radius * 1.1, radius * (doomsday ? 4.5 : 3.6)),
+            wind * randomBetween(1, doomsday ? 3.4 : 2.8) + randomBetween(-20, 20),
+            randomBetween(18, doomsday ? 94 : 78),
+            0.64,
+            0.62,
+            0.54,
+            randomBetween(0.14, doomsday ? 0.32 : 0.26),
+            randomBetween(2.5, doomsday ? 7.5 : 6.5),
+            randomBetween(3.5, doomsday ? 8.8 : 7.8),
+            kinds.radiation);
+    }
+}
+
+function spawnLavaBurst(x, y, radius, wind) {
+    for (let i = 0; i < scaledCount(radius * 1.05, 18, 150); i++) {
+        const angle = randomBetween(-Math.PI, 0);
+        const speed = randomBetween(18, radius * 1.85);
+        spawnParticle(x, y, Math.cos(angle) * speed + wind * 0.6, Math.sin(angle) * speed - randomBetween(18, 104), 1, randomBetween(0.25, 0.62), 0.08, randomBetween(0.46, 0.84), randomBetween(3, 9), randomBetween(0.65, 1.95), kinds.ember);
+    }
+
+    for (let i = 0; i < scaledCount(radius * 0.5, 8, 44); i++) {
+        spawnParticle(x + randomBetween(-radius, radius), y + randomBetween(-radius * 0.2, radius * 0.35), wind * 0.2 + randomBetween(-6, 6), randomBetween(-12, 2), 1, 0.36, 0.12, 0.16, randomBetween(22, 56), randomBetween(0.8, 1.8), kinds.heat);
+    }
+}
+
+function spawnLaserPlasma(x, y, radius, wind) {
+    for (let i = 0; i < scaledCount(radius * 1.25, 14, 96); i++) {
+        const angle = randomBetween(-Math.PI, Math.PI);
+        const speed = randomBetween(40, 230);
+        spawnParticle(x, y, Math.cos(angle) * speed + wind * 0.25, Math.sin(angle) * speed, 1, randomBetween(0.2, 0.42), randomBetween(0.32, 0.72), randomBetween(0.48, 0.88), randomBetween(2, 7), randomBetween(0.2, 0.75), kinds.plasma);
     }
 }
 
@@ -562,24 +1044,25 @@ function emitAmbient(dt, now) {
     const weather = normalized(currentWeather?.type);
     const intensity = clamp(Number(currentWeather?.intensity ?? 0.35), 0, 1);
     if (weather === "rain" || weather === "storm") {
-        const rate = (weather === "storm" ? 260 : 150) * (0.45 + intensity) * qualityScale;
+        const rate = scaledDensity((weather === "storm" ? 260 : 150) * (0.45 + intensity), true);
         emitCount(rate * elapsed, spawnRain);
         if (weather === "storm" && Math.random() < elapsed * 0.35 * intensity) {
             spawnParticle(randomBetween(160, currentWorld.width - 160), randomBetween(60, 220), 0, 0, 0.72, 0.86, 1, 0.22, randomBetween(280, 520), randomBetween(0.16, 0.32), kinds.flash);
+            spawnRadialEffect(randomBetween(160, currentWorld.width - 160), randomBetween(80, 240), randomBetween(260, 520), randomBetween(0.18, 0.34), radialKinds.flash, 0.45, [0.72, 0.86, 1, 0.16], { softness: 0.72, wind: currentWind });
         }
     } else if (weather === "snow") {
-        const rate = 85 * (0.5 + intensity) * qualityScale;
+        const rate = scaledDensity(85 * (0.5 + intensity), true);
         emitCount(rate * elapsed, spawnSnow);
     }
 
     const windStrength = Math.abs(currentWind);
     if (windStrength > 4) {
-        emitCount(windStrength * 0.7 * elapsed * qualityScale, spawnWindDust);
+        emitCount(scaledDensity(windStrength * 0.7, true) * elapsed, spawnWindDust);
     }
 
     const zones = currentScene.radiation ?? [];
     for (const zone of zones) {
-        const rate = (zone.lava ? 28 : 18) * qualityScale;
+        const rate = scaledDensity(zone.lava ? 28 : 18, true);
         emitCount(rate * elapsed, () => spawnRadiation(zone));
     }
 }
@@ -641,13 +1124,144 @@ function spawnParticle(x, y, vx, vy, r, g, b, a, size, lifetime, kind) {
     spawnCount++;
 }
 
+function spawnRadialEffect(x, y, radius, duration, type, intensity, color, options = {}) {
+    if (!enabled || !device || !radialBuffer) return;
+
+    const index = radialWriteIndex;
+    radialWriteIndex++;
+    if (radialWriteIndex >= maxRadialEffects) radialWriteIndex = persistentRadialSlots;
+
+    writeRadialSlot(index, {
+        x,
+        y,
+        radius,
+        duration,
+        type,
+        intensity,
+        color,
+        wind: options.wind ?? currentWind,
+        softness: options.softness ?? 0.2,
+        aspect: options.aspect ?? 1,
+        seed: options.seed ?? Math.random() * 1000
+    });
+}
+
+function writeRadialSlot(index, effect) {
+    if (index < 0 || index >= maxRadialEffects) return;
+
+    const offset = index * radialFloats;
+    const color = effect.color ?? [1, 1, 1, 0.4];
+    const now = performance.now();
+    radialData[offset] = Number(effect.x ?? 0);
+    radialData[offset + 1] = Number(effect.y ?? 0);
+    radialData[offset + 2] = Math.max(1, Number(effect.radius ?? 1));
+    radialData[offset + 3] = 0;
+    radialData[offset + 4] = clamp(Number(color[0] ?? 1), 0, 1);
+    radialData[offset + 5] = clamp(Number(color[1] ?? 1), 0, 1);
+    radialData[offset + 6] = clamp(Number(color[2] ?? 1), 0, 1);
+    radialData[offset + 7] = clamp(Number(color[3] ?? 0.4), 0, 1);
+    radialData[offset + 8] = Math.max(0.05, Number(effect.duration ?? 1));
+    radialData[offset + 9] = Number(effect.type ?? radialKinds.glow);
+    radialData[offset + 10] = Math.max(0, Number(effect.intensity ?? 1));
+    radialData[offset + 11] = Number(effect.seed ?? Math.random() * 1000);
+    radialData[offset + 12] = Number(effect.wind ?? currentWind);
+    radialData[offset + 13] = Math.max(0.01, Number(effect.softness ?? 0.2));
+    radialData[offset + 14] = Math.max(0.2, Number(effect.aspect ?? 1));
+    radialData[offset + 15] = Number(effect.flags ?? 0);
+    radialStartedAt[index] = now;
+    radialExpirations[index] = now + radialData[offset + 8] * 1000;
+    device.queue.writeBuffer(radialBuffer, index * radialStride, radialData, offset, radialFloats);
+}
+
+function clearRadialSlot(index) {
+    const offset = index * radialFloats;
+    for (let i = 0; i < radialFloats; i++) radialData[offset + i] = 0;
+    radialExpirations[index] = 0;
+    radialStartedAt[index] = 0;
+}
+
+function updateRadialAges(now) {
+    if (!radialBuffer) return 0;
+
+    let count = 0;
+    for (let i = 0; i < maxRadialEffects; i++) {
+        const offset = i * radialFloats;
+        if (radialData[offset + 8] <= 0) continue;
+
+        if (radialExpirations[i] <= now) {
+            clearRadialSlot(i);
+            continue;
+        }
+
+        radialData[offset + 3] = Math.max(0, (now - radialStartedAt[i]) / 1000);
+        count++;
+    }
+
+    activeRadialCount = count;
+    device.queue.writeBuffer(radialBuffer, 0, radialData);
+    return count;
+}
+
+function syncRadiationZones(zones) {
+    if (!device || !radialBuffer) return;
+
+    for (let i = 0; i < persistentRadialSlots; i++) {
+        const zone = zones[i];
+        if (!zone) {
+            clearRadialSlot(i);
+            continue;
+        }
+
+        const radius = Math.max(10, Number(zone.radius ?? 32));
+        const lava = Boolean(zone.lava);
+        const turns = Math.max(1, Number(zone.turns ?? 1));
+        writeRadialSlot(i, {
+            x: Number(zone.x ?? 0),
+            y: Number(zone.y ?? 0),
+            radius: radius * (lava ? 1.08 : 1.15),
+            duration: 9999,
+            type: lava ? radialKinds.lava : radialKinds.radiation,
+            intensity: clamp(0.38 + turns * 0.06 + radius / 420, 0.45, lava ? 0.9 : 0.78),
+            color: lava ? [1, 0.36, 0.08, 0.32] : [0.5, 1, 0.28, 0.3],
+            wind: currentWind,
+            softness: lava ? 0.34 : 0.42,
+            aspect: 1.25,
+            seed: i * 97.31 + radius
+        });
+    }
+}
+
+function hasSourceSamplingRadials() {
+    const now = performance.now();
+    for (let i = 0; i < maxRadialEffects; i++) {
+        const offset = i * radialFloats;
+        if (radialData[offset + 8] <= 0 || radialExpirations[i] <= now) continue;
+
+        const type = radialData[offset + 9];
+        const intensity = radialData[offset + 10];
+        if (isRadialKind(type, radialKinds.shockwave) || isRadialKind(type, radialKinds.heat) || isRadialKind(type, radialKinds.lava)) {
+            return intensity > 0.08;
+        }
+    }
+
+    return false;
+}
+
 function clearCpuState() {
     particleData.fill(0);
     expirations.fill(0);
+    radialData.fill(0);
+    radialExpirations.fill(0);
+    radialStartedAt.fill(0);
     writeIndex = 0;
+    radialWriteIndex = persistentRadialSlots;
     spawnCount = 0;
+    activeRadialCount = 0;
     if (device && particleBuffer) {
         device.queue.writeBuffer(particleBuffer, 0, particleData);
+    }
+    if (device && radialBuffer) {
+        device.queue.writeBuffer(radialBuffer, 0, radialData);
     }
 }
 
@@ -661,6 +1275,53 @@ function estimateParticleCount() {
     return count;
 }
 
+function estimateRadialEffectCount() {
+    const now = performance.now();
+    let count = 0;
+    for (let i = 0; i < radialExpirations.length; i++) {
+        if (radialExpirations[i] > now) count++;
+    }
+
+    return count;
+}
+
+function updateQualityTier() {
+    const tooExpensive = frameMs > 24 || sourceCopyMs > 4.5 || postProcessMs > 4 || estimateParticleCount() > maxParticles * 0.86;
+    const comfortable = frameMs < 15.5 && sourceCopyMs < 2.2 && postProcessMs < 2.2 && estimateParticleCount() < maxParticles * 0.62;
+
+    if (tooExpensive) {
+        qualityDebt++;
+        qualityCredit = 0;
+        if (qualityDebt > 7) {
+            if (qualityTier === "high") setQualityTier("balanced");
+            else if (qualityTier === "balanced") setQualityTier("low");
+            qualityDebt = 0;
+        }
+    } else if (comfortable) {
+        qualityCredit++;
+        qualityDebt = Math.max(0, qualityDebt - 1);
+        if (qualityCredit > 180) {
+            if (qualityTier === "low") setQualityTier("balanced");
+            else if (qualityTier === "balanced") setQualityTier("high");
+            qualityCredit = 0;
+        }
+    } else {
+        qualityDebt = Math.max(0, qualityDebt - 1);
+        qualityCredit = Math.max(0, qualityCredit - 1);
+    }
+
+    const profile = qualityProfiles[qualityTier] ?? qualityProfiles.high;
+    qualityScale = reducedMotion ? Math.min(profile.scale, 0.38) : profile.scale;
+    qualityLevel = profile.level;
+}
+
+function setQualityTier(tier) {
+    qualityTier = tier;
+    const profile = qualityProfiles[tier] ?? qualityProfiles.high;
+    qualityScale = reducedMotion ? Math.min(profile.scale, 0.38) : profile.scale;
+    qualityLevel = profile.level;
+}
+
 function emitCount(value, callback) {
     const whole = Math.floor(value);
     const extra = Math.random() < value - whole ? 1 : 0;
@@ -670,6 +1331,12 @@ function emitCount(value, callback) {
 function scaledCount(value, min, max) {
     const scale = reducedMotion ? 0.38 : qualityScale;
     return Math.floor(clamp(value * scale, min * scale, max * scale));
+}
+
+function scaledDensity(value, ambient = false) {
+    const profile = qualityProfiles[qualityTier] ?? qualityProfiles.high;
+    const scale = ambient ? profile.ambient : qualityScale;
+    return value * (reducedMotion ? Math.min(scale, 0.38) : scale);
 }
 
 function surfaceY(x) {
@@ -689,6 +1356,10 @@ function randomBetween(min, max) {
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+}
+
+function isRadialKind(kind, target) {
+    return Math.abs(kind - target) < 0.5;
 }
 
 function shortError(error) {
@@ -874,6 +1545,186 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
         discard;
     }
 
+    if (alpha < 0.004) {
+        discard;
+    }
+
+    return vec4f(color * alpha, alpha);
+}
+`;
+
+const postProcessShader = `
+struct RadialEffect {
+    centerRadiusAge: vec4f,
+    color: vec4f,
+    meta: vec4f,
+    extra: vec4f
+};
+
+struct Uniforms {
+    dt: f32,
+    wind: f32,
+    gravity: f32,
+    time: f32,
+    canvasSize: vec2f,
+    worldSize: vec2f,
+    sourceReady: f32,
+    qualityLevel: f32,
+    radialCount: f32,
+    pad0: f32
+};
+
+struct VertexOut {
+    @builtin(position) position: vec4f,
+    @location(0) local: vec2f,
+    @location(1) uv: vec2f,
+    @location(2) color: vec4f,
+    @location(3) effect: vec4f,
+    @location(4) meta: vec4f,
+    @location(5) extra: vec4f
+};
+
+@group(0) @binding(0) var<storage, read> effects: array<RadialEffect>;
+@group(0) @binding(1) var<uniform> uniforms: Uniforms;
+@group(0) @binding(2) var sourceTexture: texture_2d<f32>;
+@group(0) @binding(3) var sourceSampler: sampler;
+
+const corners = array<vec2f, 6>(
+    vec2f(-1.0, -1.0),
+    vec2f(1.0, -1.0),
+    vec2f(-1.0, 1.0),
+    vec2f(-1.0, 1.0),
+    vec2f(1.0, -1.0),
+    vec2f(1.0, 1.0)
+);
+
+fn inKind(kind: f32, target: f32) -> bool {
+    return abs(kind - target) < 0.5;
+}
+
+fn worldToPixel(worldPosition: vec2f) -> vec2f {
+    let scale = min(uniforms.canvasSize.x / uniforms.worldSize.x, uniforms.canvasSize.y / uniforms.worldSize.y);
+    let left = (uniforms.canvasSize.x - uniforms.worldSize.x * scale) * 0.5;
+    let top = (uniforms.canvasSize.y - uniforms.worldSize.y * scale) * 0.5;
+    return vec2f(left + worldPosition.x * scale, top + worldPosition.y * scale);
+}
+
+fn hash21(p: vec2f) -> f32 {
+    return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453123);
+}
+
+fn noise(p: vec2f) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let a = hash21(i);
+    let b = hash21(i + vec2f(1.0, 0.0));
+    let c = hash21(i + vec2f(0.0, 1.0));
+    let d = hash21(i + vec2f(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+@vertex
+fn vertexMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
+    let effect = effects[instanceIndex];
+    let corner = corners[vertexIndex];
+    let age = effect.centerRadiusAge.w;
+    let duration = effect.meta.x;
+    let progress = clamp(age / max(duration, 0.001), 0.0, 1.0);
+    let kind = effect.meta.y;
+    var radius = effect.centerRadiusAge.z;
+
+    if (duration <= 0.0 || age >= duration) {
+        radius = 0.0;
+    } else if (inKind(kind, 0.0)) {
+        radius = radius * (0.28 + progress * 0.82);
+    } else if (inKind(kind, 4.0)) {
+        radius = radius * (0.45 + progress * 0.72);
+    }
+
+    let aspect = max(effect.extra.z, 0.2);
+    let worldPosition = effect.centerRadiusAge.xy + vec2f(corner.x * radius * aspect, corner.y * radius);
+    let pixel = worldToPixel(worldPosition);
+    let clip = vec2f((pixel.x / uniforms.canvasSize.x) * 2.0 - 1.0, 1.0 - (pixel.y / uniforms.canvasSize.y) * 2.0);
+
+    var output: VertexOut;
+    output.position = vec4f(clip, 0.0, 1.0);
+    output.local = corner;
+    output.uv = pixel / uniforms.canvasSize;
+    output.color = effect.color;
+    output.effect = effect.centerRadiusAge;
+    output.meta = effect.meta;
+    output.extra = effect.extra;
+    return output;
+}
+
+@fragment
+fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
+    let duration = input.meta.x;
+    let kind = input.meta.y;
+    let intensity = input.meta.z;
+    let seed = input.meta.w;
+    let age = input.effect.w;
+    let progress = clamp(age / max(duration, 0.001), 0.0, 1.0);
+    let d = length(input.local);
+    let n = noise(input.local * 3.2 + vec2f(seed * 0.17 + uniforms.time * 0.34 + input.extra.x * 0.01, seed * 0.11 - uniforms.time * 0.21));
+    var alpha = 0.0;
+    var color = input.color.rgb;
+    var uvOffset = vec2f(0.0, 0.0);
+    var sourceMix = 0.0;
+
+    if (duration <= 0.0 || age >= duration || d > 1.18) {
+        discard;
+    }
+
+    if (inKind(kind, 0.0)) {
+        let ring = 1.0 - smoothstep(0.026, 0.145, abs(d - 0.82));
+        let ripple = 0.72 + 0.28 * n;
+        alpha = input.color.a * intensity * ring * ripple * (1.0 - progress * 0.72);
+        let direction = normalize(input.local + vec2f(0.001, 0.001));
+        uvOffset = direction * ring * intensity * (0.006 + 0.011 * (1.0 - progress));
+        sourceMix = 0.72;
+        color = mix(color, vec3f(1.0, 0.95, 0.72), 0.28);
+    } else if (inKind(kind, 1.0)) {
+        let body = smoothstep(1.05, 0.0, d);
+        alpha = input.color.a * intensity * body * body * (1.0 - progress);
+        sourceMix = 0.18;
+    } else if (inKind(kind, 2.0)) {
+        let body = smoothstep(1.02, 0.16, d);
+        let boundary = 1.0 - smoothstep(0.025, 0.12, abs(d - (0.78 + sin(uniforms.time * 1.7 + seed) * 0.025)));
+        let pulse = 0.72 + 0.28 * sin(uniforms.time * 2.4 + seed);
+        alpha = input.color.a * intensity * (body * 0.36 + boundary * 0.72) * (0.72 + n * 0.28) * pulse;
+        color = mix(vec3f(0.36, 1.0, 0.25), vec3f(0.88, 1.0, 0.34), n * 0.55 + boundary * 0.24);
+    } else if (inKind(kind, 3.0) || inKind(kind, 5.0)) {
+        let body = smoothstep(1.04, 0.08, d);
+        let waves = 0.5 + 0.5 * sin((input.local.x + input.local.y) * 9.0 + uniforms.time * 8.0 + seed);
+        alpha = input.color.a * intensity * body * (0.28 + 0.72 * n) * (0.55 + waves * 0.18);
+        uvOffset = vec2f(sin(input.local.y * 10.0 + uniforms.time * 7.0 + seed), cos(input.local.x * 8.0 - uniforms.time * 5.0)) * intensity * body * 0.0045;
+        sourceMix = 0.46;
+        color = mix(color, vec3f(1.0, 0.54, 0.12), 0.34 + n * 0.24);
+    } else if (inKind(kind, 4.0)) {
+        let ring = 1.0 - smoothstep(0.08, 0.28, abs(d - 0.78));
+        let body = smoothstep(1.0, 0.2, d) * (1.0 - progress * 0.35);
+        alpha = input.color.a * intensity * (body * 0.24 + ring * 0.62) * (0.72 + n * 0.28) * (1.0 - progress * 0.55);
+        color = mix(color, vec3f(0.66, 0.55, 0.38), 0.42);
+    } else {
+        let body = smoothstep(1.05, 0.08, d);
+        alpha = input.color.a * intensity * body * (1.0 - progress * 0.7);
+    }
+
+    if (uniforms.qualityLevel <= 0.5) {
+        alpha = alpha * 0.72;
+        sourceMix = 0.0;
+        uvOffset = vec2f(0.0, 0.0);
+    }
+
+    if (uniforms.sourceReady > 0.5 && sourceMix > 0.0) {
+        let sampleUv = clamp(input.uv + uvOffset, vec2f(0.001, 0.001), vec2f(0.999, 0.999));
+        let sampled = textureSampleLevel(sourceTexture, sourceSampler, sampleUv, 0.0).rgb;
+        color = mix(color, sampled + color * 0.42, sourceMix);
+    }
+
+    alpha = clamp(alpha, 0.0, 0.78);
     if (alpha < 0.004) {
         discard;
     }

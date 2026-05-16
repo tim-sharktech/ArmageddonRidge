@@ -95,8 +95,12 @@
                         <span>Batch: @_commandCount / @_payloadBytes bytes</span>
                         <span>SIMD: @SimdStatusLabel</span>
                         <span>FX: @EffectsStatusLabel</span>
+                        <span>FX Quality: @_effectQualityTier</span>
                         <span>FX Frame: @_effectFrameMs.ToString("0.00") ms</span>
+                        <span>FX Post: @_effectPostProcessMs.ToString("0.00") ms</span>
+                        <span>FX Copy: @_effectSourceCopyMs.ToString("0.00") ms</span>
                         <span>FX Particles: @_effectParticleCount</span>
+                        <span>FX Radials: @_effectRadialEffectCount</span>
                         <span>FX Spawns: @_effectSpawnCount</span>
                         <span>Sim: @_state.LastPerformance.SimulationMs.ToString("0.00") ms</span>
                         <span>Terrain: @_state.LastPerformance.TerrainMs.ToString("0.00") ms</span>

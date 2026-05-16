@@ -47,8 +47,12 @@ public partial class Home
     private bool _effectsSupported;
     private bool _effectsActive;
     private double _effectFrameMs;
+    private double _effectPostProcessMs;
+    private double _effectSourceCopyMs;
     private int _effectParticleCount;
+    private int _effectRadialEffectCount;
     private int _effectSpawnCount;
+    private string _effectQualityTier = "n/a";
     private string _effectFallbackReason = "Not initialized";
     private string _rendererModeLabel = "Hybrid";
     private int _bestScore;
@@ -335,6 +339,8 @@ public partial class Home
             await Renderer.PlayShotAsync(preShotScene, resolution, _screenShake && !_reducedMotion);
             await impactAudioTask;
             await impactFeedbackTask;
+            if (resolution.RoundEnded && hasNuclear)
+                await HoldRoundResultForNukeEffectsAsync(resolution);
         }
         catch (JSException ex)
         {
@@ -434,6 +440,14 @@ public partial class Home
         return visualDuration;
     }
 
+    private Task HoldRoundResultForNukeEffectsAsync(ShotResolution resolution)
+    {
+        if (_reducedMotion) return Task.Delay(180);
+
+        var delay = resolution.WeaponId == WeaponIds.DoomsdayNuke ? 1350 : 760;
+        return Task.Delay(delay);
+    }
+
     private async Task BuyWeaponAsync(string weaponId)
     {
         if (_state is not null && Engine.BuyWeapon(_state, weaponId))
@@ -480,7 +494,7 @@ public partial class Home
 
         if (!_effectsReady)
         {
-            ApplyEffectsStats(await Effects.InitializeAsync(_effectsCanvas, _webGpuEffectsEnabled));
+            ApplyEffectsStats(await Effects.InitializeAsync(_canvas, _effectsCanvas, _webGpuEffectsEnabled));
             _effectsReady = true;
         }
     }
@@ -949,8 +963,12 @@ public partial class Home
         _effectsSupported = stats.Supported;
         _effectsActive = stats.Enabled;
         _effectFrameMs = stats.FrameMs;
+        _effectPostProcessMs = stats.PostProcessMs;
+        _effectSourceCopyMs = stats.SourceCopyMs;
         _effectParticleCount = stats.ParticleCount;
+        _effectRadialEffectCount = stats.RadialEffectCount;
         _effectSpawnCount = stats.SpawnCount;
+        _effectQualityTier = string.IsNullOrWhiteSpace(stats.QualityTier) ? "n/a" : stats.QualityTier;
         _effectFallbackReason = stats.FallbackReason;
     }
 

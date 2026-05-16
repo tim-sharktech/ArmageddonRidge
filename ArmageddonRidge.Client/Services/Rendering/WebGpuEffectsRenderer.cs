@@ -10,12 +10,12 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
     private IJSObjectReference? _module;
     private WebGpuEffectsStats _stats = new();
 
-    public async ValueTask<WebGpuEffectsStats?> InitializeAsync(ElementReference canvas, bool enabled)
+    public async ValueTask<WebGpuEffectsStats?> InitializeAsync(ElementReference baseCanvas, ElementReference effectsCanvas, bool enabled)
     {
         try
         {
             _module ??= await js.InvokeAsync<IJSObjectReference>("import", "./js/webGpuEffectsRenderer.js");
-            _stats = await _module.InvokeAsync<WebGpuEffectsStats>("initialize", canvas, new { enabled })
+            _stats = await _module.InvokeAsync<WebGpuEffectsStats>("initialize", baseCanvas, effectsCanvas, new { enabled })
                 ?? new WebGpuEffectsStats();
         }
         catch (JSException ex)
