@@ -45,17 +45,21 @@
     else
     {
         <div class="battle-layout @BattleLayoutCss">
-            <section class="@BattlefieldPanelCss" @onpointermove="HandleBattlePanelPointerMove" @onpointerup="EndBattlePanelDrag" @onpointerleave="EndBattlePanelDrag">
+            <section class="@BattlefieldPanelCss">
                 <canvas @ref="_canvas" class="battlefield" width="1200" height="700" aria-label="Armageddon Ridge battlefield"></canvas>
                 <canvas @ref="_effectsCanvas" class="battlefield-effects" width="1200" height="700" aria-hidden="true"></canvas>
+                @if (VisiblePhase == GamePhase.Battle)
+                {
+                    <button class="battlefield-fps-button" title="Toggle performance overlay" @onclick="TogglePerf">FPS</button>
+                }
                 <div class="@BattleHudCss" aria-label="Battle health">
                     <div class="@PlayerVersusHealthCss">
                         <div class="fighter-label">
                             <span>Player</span>
-                            <strong>@TankHealth(_state.PlayerTank) HP</strong>
+                            <strong>@DisplayTankHealth(_state.PlayerTank, true) HP</strong>
                         </div>
                         <div class="fighter-bar health">
-                            <span style="width:@TankHealthWidth(_state.PlayerTank)"></span>
+                            <span style="width:@TankHealthWidth(_state.PlayerTank, true)"></span>
                         </div>
                         <div class="fighter-bar shield">
                             <span style="width:@TankShieldWidth(_state.PlayerTank)"></span>
@@ -71,10 +75,10 @@
                     <div class="@CpuVersusHealthCss">
                         <div class="fighter-label">
                             <span>@_state.CpuTank.Name</span>
-                            <strong>@TankHealth(_state.CpuTank) HP</strong>
+                            <strong>@DisplayTankHealth(_state.CpuTank, false) HP</strong>
                         </div>
                         <div class="fighter-bar health">
-                            <span style="width:@TankHealthWidth(_state.CpuTank)"></span>
+                            <span style="width:@TankHealthWidth(_state.CpuTank, false)"></span>
                         </div>
                         <div class="fighter-bar shield">
                             <span style="width:@TankShieldWidth(_state.CpuTank)"></span>
@@ -99,8 +103,12 @@
                         <span>FX Frame: @_effectFrameMs.ToString("0.00") ms</span>
                         <span>FX Post: @_effectPostProcessMs.ToString("0.00") ms</span>
                         <span>FX Copy: @_effectSourceCopyMs.ToString("0.00") ms</span>
-                        <span>FX Particles: @_effectParticleCount</span>
+                        <span>FX Particles: @_effectActiveParticleCount / @_effectParticleCapacity (@_effectParticleCount)</span>
                         <span>FX Radials: @_effectRadialEffectCount</span>
+                        <span>FX Scale: @_effectOverlayScale.ToString("0.00") @@ @_effectCanvasPixelRatio.ToString("0.0")x</span>
+                        <span>FX Copy Cadence: @_effectSourceCopyCadence</span>
+                        <span>FX GPU Queue: @_effectGpuQueueMs.ToString("0.00") ms</span>
+                        <span>FX Perf: @_effectPerfMode</span>
                         <span>FX Spawns: @_effectSpawnCount</span>
                         <span>Sim: @_state.LastPerformance.SimulationMs.ToString("0.00") ms</span>
                         <span>Terrain: @_state.LastPerformance.TerrainMs.ToString("0.00") ms</span>
@@ -110,51 +118,25 @@
                 }
                 @if (VisiblePhase == GamePhase.Battle)
                 {
-                    <div class="@FloatingCommandCss" style="@BattlePanelStyle" aria-label="Battle controls">
-                        <div class="floating-command-drag" title="Move battle controls" @onpointerdown="BeginBattlePanelDrag" @onpointerdown:stopPropagation="true">
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                        </div>
-                        <div class="dock-actions" aria-label="Dock battle controls">
-                            <button title="Dock controls left" @onclick="DockBattlePanelLeft">L</button>
-                            <button title="Dock controls right" @onclick="DockBattlePanelRight">R</button>
-                        </div>
-                        @if (_battlePanelCollapsed)
-                        {
-                            <div class="floating-instruments">
-                                <div class="instrument-top">
-                                    <button class="command-toggle" title="@BattlePanelToggleTitle" @onclick="ToggleBattlePanel">Panel</button>
-                                    <label class="weapon-compact">
-                                        <span>Weapon</span>
-                                        <select @bind="_state.SelectedWeaponId" aria-label="Weapon">
-                                            @foreach (var weapon in AvailablePlayerWeapons)
-                                            {
-                                                <option value="@weapon.Id">@weapon.DisplayName (@InventoryLabel(weapon.Id))</option>
-                                            }
-                                        </select>
-                                    </label>
-                                </div>
-                                <label class="angle-gauge" style="@AngleGaugeStyle">
-                                    <span>Angle <strong>@_state.PlayerTank.TurretAngle.ToString("0")</strong></span>
-                                    <span class="dial-face" aria-hidden="true">
-                                        <span class="dial-arc"></span>
-                                        <span class="dial-needle"></span>
-                                        <span class="dial-hub"></span>
-                                    </span>
-                                    <input class="dial-scrub" type="range" min="5" max="85" step="1" value="@AngleScrubValue" @oninput="HandleAngleScrubInputAsync" aria-label="Angle" />
-                                </label>
-                                <label class="velocity-control">
-                                    <span>Velocity <strong>@_power</strong></span>
-                                    <input type="range" min="1" max="100" step="1" @bind="_power" @bind:event="oninput" aria-label="Velocity" />
-                                </label>
-                                <button class="fire-button floating-fire" disabled="@(!CanFirePlayer)" @onclick="FirePlayerAsync">Fire</button>
-                            </div>
-                        }
-                        else
-                        {
-                            <button class="command-toggle" title="@BattlePanelToggleTitle" @onclick="ToggleBattlePanel">Wide</button>
-                        }
+                    <div class="battle-console" aria-label="Battle controls">
+                        <label class="console-field console-weapon">
+                            <span>Weapon <strong>@InventoryLabel(_state.SelectedWeaponId)</strong></span>
+                            <select @bind="_state.SelectedWeaponId" aria-label="Weapon">
+                                @foreach (var weapon in AvailablePlayerWeapons)
+                                {
+                                    <option value="@weapon.Id">@weapon.DisplayName (@InventoryLabel(weapon.Id))</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="console-field">
+                            <span>Angle <strong>@_state.PlayerTank.TurretAngle.ToString("0")</strong></span>
+                            <input type="range" min="5" max="85" step="1" value="@AngleScrubValue" @oninput="HandleAngleScrubInputAsync" aria-label="Angle" />
+                        </label>
+                        <label class="console-field">
+                            <span>Velocity <strong>@_power</strong></span>
+                            <input type="range" min="1" max="100" step="1" @bind="_power" @bind:event="oninput" aria-label="Velocity" />
+                        </label>
+                        <button class="fire-button console-fire" disabled="@(!CanFirePlayer)" @onclick="FirePlayerAsync">Fire</button>
                     </div>
                 }
             </section>
@@ -166,10 +148,6 @@
                         <h2>@VisiblePhase</h2>
                     </div>
                     <div class="hud-actions">
-                        @if (VisiblePhase == GamePhase.Battle)
-                        {
-                            <button title="@BattlePanelToggleTitle" @onclick="ToggleBattlePanel">Wide</button>
-                        }
                         <button title="Toggle performance overlay" @onclick="TogglePerf">FPS</button>
                     </div>
                 </header>

@@ -52,6 +52,8 @@ public sealed class HeadlessEdgeStartupTests
         Assert.True(result.GameRootRendered, "Blazor did not render .game-root.");
         Assert.True(result.BattlefieldRendered, "The battlefield canvas did not render after starting a duel.");
         Assert.True(result.EffectsCanvasRendered, "The WebGPU effects overlay canvas did not render after starting a duel.");
+        Assert.True(result.BattleConsoleRendered, "The bottom battle console did not render after starting a duel.");
+        Assert.True(result.BattlefieldFpsButtonRendered, "The battlefield FPS button did not render after starting a duel.");
         Assert.Empty(result.ConsoleErrors);
         Assert.Empty(result.Exceptions);
         Assert.Empty(result.NetworkFailures);
@@ -232,15 +234,28 @@ public sealed class HeadlessEdgeStartupTests
                     """);
                 await client.ClickButtonByTextAsync("New Duel");
                 await Task.Delay(TimeSpan.FromSeconds(2));
+                var shopStartVisible = await client.EvaluateBooleanAsync("""
+                    Array.from(document.querySelectorAll('button'))
+                        .some(button => button.textContent?.trim() === 'Start battle')
+                    """);
+                if (shopStartVisible)
+                {
+                    await client.ClickButtonByTextAsync("Start battle");
+                    await Task.Delay(TimeSpan.FromSeconds(1));
+                }
             }
 
             var battlefieldRendered = await client.EvaluateBooleanAsync("Boolean(document.querySelector('canvas.battlefield'))");
             var effectsCanvasRendered = await client.EvaluateBooleanAsync("Boolean(document.querySelector('canvas.battlefield-effects'))");
+            var battleConsoleRendered = await client.EvaluateBooleanAsync("Boolean(document.querySelector('.battle-console'))");
+            var battlefieldFpsButtonRendered = await client.EvaluateBooleanAsync("Boolean(document.querySelector('.battlefield-fps-button'))");
 
             return new BrowserSmokeResult(
                 gameRootRendered,
                 battlefieldRendered,
                 effectsCanvasRendered,
+                battleConsoleRendered,
+                battlefieldFpsButtonRendered,
                 client.ConsoleErrors.ToArray(),
                 client.Exceptions.ToArray(),
                 client.NetworkFailures.Where(f => f.Contains("localhost", StringComparison.OrdinalIgnoreCase)).ToArray(),
@@ -359,6 +374,8 @@ public sealed class HeadlessEdgeStartupTests
         bool GameRootRendered,
         bool BattlefieldRendered,
         bool EffectsCanvasRendered,
+        bool BattleConsoleRendered,
+        bool BattlefieldFpsButtonRendered,
         string[] ConsoleErrors,
         string[] Exceptions,
         string[] NetworkFailures,

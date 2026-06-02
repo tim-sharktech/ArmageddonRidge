@@ -113,7 +113,32 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
     /// <summary>
     /// Fires the current turn's weapon and fully resolves projectile, explosions, terrain, and turn handoff.
     /// </summary>
-    public ShotResolution FireCurrentTurn(GameState state, MatchSettings settings, float? angle = null, int? power = null)
+    public ShotResolution FireCurrentTurn(GameState state, MatchSettings settings, float? angle = null, int? power = null) =>
+        FireCurrentTurnCore(state, settings, angle, power, null);
+
+    /// <summary>
+    /// Fires a CPU turn using an already-computed plan.
+    /// </summary>
+    public ShotResolution FirePlannedCpuTurn(GameState state, MatchSettings settings, CpuShotPlan plan)
+    {
+        if (state.CurrentTurn != TurnOwner.Cpu)
+            throw new InvalidOperationException("Cannot use a CPU plan outside the CPU turn.");
+
+        return FireCurrentTurnCore(state, settings, plan.Angle, plan.Power, plan);
+    }
+
+    /// <summary>
+    /// Plans the current CPU turn while yielding periodically to avoid monopolizing browser animation.
+    /// </summary>
+    public ValueTask<CpuShotPlan> PlanCurrentCpuTurnAsync(GameState state, MatchSettings settings, CancellationToken cancellationToken = default)
+    {
+        if (state.Phase != GamePhase.Battle || state.CurrentTurn != TurnOwner.Cpu)
+            throw new InvalidOperationException("Cannot plan a CPU shot outside the CPU battle turn.");
+
+        return Cpu.PlanShotAsync(state, settings, cancellationToken);
+    }
+
+    private ShotResolution FireCurrentTurnCore(GameState state, MatchSettings settings, float? angle, int? power, CpuShotPlan? plannedCpuShot)
     {
         if (state.Phase != GamePhase.Battle)
             throw new InvalidOperationException("Cannot fire outside the battle phase.");
@@ -126,7 +151,7 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
 
         if (state.CurrentTurn == TurnOwner.Cpu)
         {
-            var plan = Cpu.PlanShot(state, settings);
+            var plan = plannedCpuShot ?? Cpu.PlanShot(state, settings);
             weaponId = plan.WeaponId;
             angle = plan.Angle;
             power = plan.Power;

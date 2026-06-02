@@ -6,6 +6,8 @@
 <section class="benchmark-page">
     <h1>Benchmark Ridge</h1>
     <p>Repeatable local scenarios for validating Blazor WASM gameplay throughput.</p>
-    <button class="primary" @onclick="RunAsync">Run projectile batch</button>
+    <button class="primary" @onclick="RunProjectileBatchAsync">Run projectile batch</button>
+    <button @onclick="RunCpuPlanningAsync">Run CPU planning</button>
+    <button @onclick="RunTerrainSimdAsync">Run terrain SIMD</button>
     <pre>@_results</pre>
 </section>

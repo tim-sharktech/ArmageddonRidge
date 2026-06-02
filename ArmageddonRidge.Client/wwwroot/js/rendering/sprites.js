@@ -11,6 +11,21 @@ export function spriteFrame(name) {
     return manifest?.frames?.[name];
 }
 
+export function hasSprite(name) {
+    return Boolean(extraSprites[name]);
+}
+
+export function drawExtraSprite(name, x, y, width, height) {
+    const ctx = getContext();
+    const sprite = extraSprites[name];
+    if (!ctx || !sprite) {
+        fallbackSprite(name, x, y, width, height);
+        return;
+    }
+
+    ctx.drawImage(sprite, x, y, width, height);
+}
+
 export function drawSprite(name, x, y, width, height) {
     const ctx = getContext();
     const sprite = extraSprites[name] ?? atlas;

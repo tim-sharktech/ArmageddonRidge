@@ -39,6 +39,16 @@ public sealed class TerrainMask
     public IReadOnlyList<float> SolidTop => _solidTop;
 
     /// <summary>
+    /// Reports whether the current runtime can accelerate terrain deformation with SIMD vectors.
+    /// </summary>
+    public static bool SimdAccelerated => Vector.IsHardwareAccelerated && Vector<float>.Count > 1;
+
+    /// <summary>
+    /// Gets the number of terrain columns processed per SIMD vector.
+    /// </summary>
+    public static int SimdLaneCount => Vector<float>.Count;
+
+    /// <summary>
     /// Copies terrain heights from another mask with matching dimensions.
     /// </summary>
     public void CopyFrom(TerrainMask source)
@@ -109,24 +119,40 @@ public sealed class TerrainMask
     /// <summary>
     /// Removes a circular crater from the heightmap and returns touched column count.
     /// </summary>
-    public int RemoveCircle(Vector2 center, float radius)
-    {
-        return Vector.IsHardwareAccelerated
-            ? ApplyCircleSimd(center, radius, removeTerrain: true)
-            : RemoveCircleScalar(center, radius);
-    }
+    public int RemoveCircle(Vector2 center, float radius) => RemoveCircle(center, radius, TerrainDeformationMode.Auto);
+
+    /// <summary>
+    /// Removes a circular crater with an explicit deformation kernel, used by benchmarks and diagnostics.
+    /// </summary>
+    public int RemoveCircle(Vector2 center, float radius, TerrainDeformationMode mode) =>
+        mode switch
+        {
+            TerrainDeformationMode.Scalar => ApplyCircleScalar(center, radius, removeTerrain: true),
+            TerrainDeformationMode.Simd => ApplyCircleSimd(center, radius, removeTerrain: true),
+            _ => SimdAccelerated
+                ? ApplyCircleSimd(center, radius, removeTerrain: true)
+                : ApplyCircleScalar(center, radius, removeTerrain: true)
+        };
 
     /// <summary>
     /// Adds a circular dirt mound to the heightmap and returns touched column count.
     /// </summary>
-    public int AddCircle(Vector2 center, float radius)
-    {
-        return Vector.IsHardwareAccelerated
-            ? ApplyCircleSimd(center, radius, removeTerrain: false)
-            : AddCircleScalar(center, radius);
-    }
+    public int AddCircle(Vector2 center, float radius) => AddCircle(center, radius, TerrainDeformationMode.Auto);
 
-    private int RemoveCircleScalar(Vector2 center, float radius)
+    /// <summary>
+    /// Adds a circular dirt mound with an explicit deformation kernel, used by benchmarks and diagnostics.
+    /// </summary>
+    public int AddCircle(Vector2 center, float radius, TerrainDeformationMode mode) =>
+        mode switch
+        {
+            TerrainDeformationMode.Scalar => ApplyCircleScalar(center, radius, removeTerrain: false),
+            TerrainDeformationMode.Simd => ApplyCircleSimd(center, radius, removeTerrain: false),
+            _ => SimdAccelerated
+                ? ApplyCircleSimd(center, radius, removeTerrain: false)
+                : ApplyCircleScalar(center, radius, removeTerrain: false)
+        };
+
+    private int ApplyCircleScalar(Vector2 center, float radius, bool removeTerrain)
     {
         var touched = 0;
         var minX = Math.Max(0, (int)MathF.Floor(center.X - radius));
@@ -139,34 +165,9 @@ public sealed class TerrainMask
             if (remaining <= 0)
                 continue;
 
-            var lowerArc = center.Y + MathF.Sqrt(remaining);
-            var nextTop = Math.Clamp(lowerArc, 0, Height);
-            if (nextTop > _solidTop[x])
-            {
-                _solidTop[x] = nextTop;
-                touched++;
-            }
-        }
-
-        return touched;
-    }
-
-    private int AddCircleScalar(Vector2 center, float radius)
-    {
-        var touched = 0;
-        var minX = Math.Max(0, (int)MathF.Floor(center.X - radius));
-        var maxX = Math.Min(Width - 1, (int)MathF.Ceiling(center.X + radius));
-
-        for (var x = minX; x <= maxX; x++)
-        {
-            var dx = x - center.X;
-            var remaining = (radius * radius) - (dx * dx);
-            if (remaining <= 0)
-                continue;
-
-            var upperArc = center.Y - MathF.Sqrt(remaining);
-            var nextTop = Math.Clamp(upperArc, 0, Height);
-            if (nextTop < _solidTop[x])
+            var arc = center.Y + (MathF.Sqrt(remaining) * (removeTerrain ? 1f : -1f));
+            var nextTop = Math.Clamp(arc, 0, Height);
+            if ((removeTerrain && nextTop > _solidTop[x]) || (!removeTerrain && nextTop < _solidTop[x]))
             {
                 _solidTop[x] = nextTop;
                 touched++;
@@ -184,7 +185,7 @@ public sealed class TerrainMask
         var width = maxX - minX + 1;
         var lanes = Vector<float>.Count;
         if (width < lanes * 2)
-            return removeTerrain ? RemoveCircleScalar(center, radius) : AddCircleScalar(center, radius);
+            return ApplyCircleScalar(center, radius, removeTerrain);
 
         var radiusSquared = new Vector<float>(radius * radius);
         var centerX = new Vector<float>(center.X);
@@ -209,15 +210,7 @@ public sealed class TerrainMask
             var updated = Vector.ConditionalSelect(changedInCircle, nextTop, current);
             for (var lane = 0; lane < lanes; lane++)
             {
-                var ix = x + lane;
-                var scalarDx = ix - center.X;
-                var scalarRemaining = (radius * radius) - (scalarDx * scalarDx);
-                if (scalarRemaining <= 0)
-                    continue;
-
-                var scalarArc = center.Y + (MathF.Sqrt(scalarRemaining) * (removeTerrain ? 1f : -1f));
-                var scalarNextTop = Math.Clamp(scalarArc, 0, Height);
-                if ((removeTerrain && scalarNextTop > _solidTop[ix]) || (!removeTerrain && scalarNextTop < _solidTop[ix]))
+                if (changedInCircle[lane] != 0)
                     touched++;
             }
 
@@ -249,4 +242,25 @@ public sealed class TerrainMask
         for (var i = 0; i < lanes.Length; i++) lanes[i] = i;
         return new Vector<float>(lanes);
     }
+}
+
+/// <summary>
+/// Selects the terrain deformation implementation used for crater and dirt benchmark scenarios.
+/// </summary>
+public enum TerrainDeformationMode
+{
+    /// <summary>
+    /// Uses SIMD when the runtime supports it and scalar code otherwise.
+    /// </summary>
+    Auto,
+
+    /// <summary>
+    /// Uses the one-column-at-a-time reference implementation.
+    /// </summary>
+    Scalar,
+
+    /// <summary>
+    /// Uses the vectorized implementation that updates multiple terrain columns per operation.
+    /// </summary>
+    Simd
 }

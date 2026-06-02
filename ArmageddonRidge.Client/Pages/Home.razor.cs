@@ -27,7 +27,6 @@ public partial class Home
     private bool _canFire = true;
     private bool _showPerf;
     private bool _settingsOpen;
-    private bool _battlePanelCollapsed;
     private bool _screenShake = true;
     private bool _reducedMotion;
     private bool _targetingComputerEnabledByDefault = true;
@@ -50,8 +49,15 @@ public partial class Home
     private double _effectPostProcessMs;
     private double _effectSourceCopyMs;
     private int _effectParticleCount;
+    private int _effectActiveParticleCount;
+    private int _effectParticleCapacity;
     private int _effectRadialEffectCount;
     private int _effectSpawnCount;
+    private double _effectOverlayScale = 1;
+    private double _effectCanvasPixelRatio = 1;
+    private int _effectSourceCopyCadence;
+    private double _effectGpuQueueMs;
+    private string _effectPerfMode = "adaptive";
     private string _effectQualityTier = "n/a";
     private string _effectFallbackReason = "Not initialized";
     private string _rendererModeLabel = "Hybrid";
@@ -59,6 +65,8 @@ public partial class Home
     private bool _rendererReady;
     private bool _effectsReady;
     private bool _shotPlaybackInProgress;
+    private int? _displayPlayerHealth;
+    private int? _displayCpuHealth;
     private int _terrainRevision;
     private int _lastSentTerrainRevision = -1;
     private CancellationTokenSource? _perfLoop;
@@ -67,14 +75,6 @@ public partial class Home
     private bool _playerShieldHit;
     private bool _cpuShieldHit;
     private int _damagePulse;
-    private bool _battlePanelDragging;
-    private double _battlePanelDragStartX;
-    private double _battlePanelDragStartY;
-    private double _battlePanelStartOffsetX;
-    private double _battlePanelStartOffsetY;
-    private double _battlePanelOffsetX;
-    private double _battlePanelOffsetY;
-    private string _battlePanelAnchor = "auto";
     private WeaponDefinition[] _allWeapons = [];
     private UpgradeDefinition[] _allUpgrades = [];
     private string[] _unlockedWeaponIds = [];
@@ -111,42 +111,11 @@ public partial class Home
     private string CpuVersusHealthCss =>
         $"versus-health cpu{(_cpuHurt ? " is-hurt" : "")}{(_cpuShieldHit ? " is-shield-hit" : "")}";
 
-    private string FloatingCommandCss =>
-        $"floating-command{(_battlePanelCollapsed ? " is-expanded" : " is-compact")}{(_battlePanelDragging ? " is-dragging" : "")}";
-
-    private string BattlePanelStyle =>
-        FormattableString.Invariant($"--battle-panel-left:{BattlePanelBaseLeftPercent:0.###}%;--battle-panel-top:{BattlePanelBaseTopPercent:0.###}%;--battle-panel-dx:{_battlePanelOffsetX:0.###}px;--battle-panel-dy:{_battlePanelOffsetY:0.###}px;");
-
-    private double BattlePanelBaseLeftPercent => _state is null
-        ? 68
-        : _battlePanelAnchor == "left"
-            ? 15
-            : _battlePanelAnchor == "right"
-                ? 85
-                : _state.CpuTank.Position.X >= GameConstants.WorldWidth * 0.5f ? 15 : 85;
-
-    private double BattlePanelBaseTopPercent => _state is null
-        ? 50
-        : 50;
-
     private string BattleLayoutCss => VisiblePhase == GamePhase.Battle
-        ? (_battlePanelCollapsed ? "is-battle panel-collapsed" : "is-battle")
+        ? "is-battle"
         : string.Empty;
 
-    private string BattlePanelToggleTitle => _battlePanelCollapsed ? "Hide command panel" : "Show command panel";
-
-    private string AngleGaugeStyle => FormattableString.Invariant($"--angle-rotation:{AngleGaugeRotation:0.###}deg;");
-
     private float AngleScrubValue => 90f - Math.Clamp(_state?.PlayerTank.TurretAngle ?? 45f, 5f, 85f);
-
-    private float AngleGaugeRotation
-    {
-        get
-        {
-            var angle = _state?.PlayerTank.TurretAngle ?? 45f;
-            return -Math.Clamp(angle, 5f, 85f);
-        }
-    }
 
     private string WindText => _state is null
         ? "0"
@@ -233,9 +202,6 @@ public partial class Home
         if (_state is null) return;
 
         Engine.StartBattle(_state);
-        _battlePanelCollapsed = true;
-        _battlePanelAnchor = "auto";
-        ResetBattlePanelDrag();
         await Audio.PlayAsync("menu");
         await RenderSceneAsync();
     }
@@ -266,6 +232,7 @@ public partial class Home
             var cpuShieldBefore = _state.CpuTank.Shield;
             var playerPreShotScene = BuildScene();
             var playerShot = Engine.FireCurrentTurn(_state, _settings, _state.PlayerTank.TurretAngle, _power);
+            HoldDisplayedHealth(playerHealthBefore, cpuHealthBefore);
             RecordTracerTrail(playerShot.Trail);
             await PlayResolutionAsync(
                 playerPreShotScene,
@@ -281,12 +248,16 @@ public partial class Home
             if (_state.Phase == GamePhase.Battle && _state.CurrentTurn == TurnOwner.Cpu)
             {
                 await Task.Delay(_reducedMotion ? 250 : 700);
+                await RenderSceneCoreAsync(force: true);
+                await Task.Delay(1);
+                var cpuPlan = await Engine.PlanCurrentCpuTurnAsync(_state, _settings);
                 playerHealthBefore = _state.PlayerTank.Health;
                 cpuHealthBefore = _state.CpuTank.Health;
                 playerShieldBefore = _state.PlayerTank.Shield;
                 cpuShieldBefore = _state.CpuTank.Shield;
                 var cpuPreShotScene = BuildScene();
-                var cpuShot = Engine.FireCurrentTurn(_state, _settings);
+                var cpuShot = Engine.FirePlannedCpuTurn(_state, _settings, cpuPlan);
+                HoldDisplayedHealth(playerHealthBefore, cpuHealthBefore);
                 await PlayResolutionAsync(
                     cpuPreShotScene,
                     cpuShot,
@@ -328,17 +299,23 @@ public partial class Home
             await Audio.PlayAsync(hasNuclear ? "nuclear" : "fire");
             impactAudioTask = PlayImpactAudioDuringPlaybackAsync(resolution, shieldHit, healthHit, hasNuclear);
             impactFeedbackTask = PlayImpactFeedbackDuringPlaybackAsync(resolution, playerHealthBefore, cpuHealthBefore, playerShieldBefore, cpuShieldBefore);
-            var effectsStats = await Effects.SpawnShotEffectsAsync(
-                resolution,
-                preShotScene.Wind,
-                _terrainRevision,
-                shieldHit,
-                healthHit,
-                _reducedMotion,
-                "flight",
-                _renderMode == RenderMode.Hybrid);
+            var effectsStats = await AwaitWithTimeoutAsync(
+                Effects.SpawnShotEffectsAsync(
+                    resolution,
+                    preShotScene.Wind,
+                    _terrainRevision,
+                    shieldHit,
+                    healthHit,
+                    _reducedMotion,
+                    "flight",
+                    _renderMode == RenderMode.Hybrid).AsTask(),
+                900,
+                "WebGPU shot effects");
             ApplyEffectsStats(effectsStats);
-            await Renderer.PlayShotAsync(preShotScene, resolution, _screenShake && !_reducedMotion);
+            await AwaitWithTimeoutAsync(
+                Renderer.PlayShotAsync(preShotScene, resolution, _screenShake && !_reducedMotion).AsTask(),
+                EstimateShotVisualDurationMs(resolution) + 2600,
+                "renderer shot playback");
             await impactAudioTask;
             await impactFeedbackTask;
             if (resolution.RoundEnded && hasNuclear)
@@ -356,15 +333,55 @@ public partial class Home
         finally
         {
             _shotPlaybackInProgress = false;
+            ReleaseDisplayedHealth();
         }
 
+        await InvokeAsync(StateHasChanged);
+
         if (resolution.Performance.TerrainColumnsTouched > 0) MarkTerrainChanged();
-        if (resolution.Performance.TerrainColumnsTouched > 0)
+        if (!resolution.RoundEnded && resolution.Performance.TerrainColumnsTouched > 0)
         {
-            ApplyEffectsStats(await Effects.SpawnTerrainEffectsAsync(resolution, preShotScene.Wind, _terrainRevision, _reducedMotion));
+            ApplyEffectsStats(await AwaitWithTimeoutAsync(
+                Effects.SpawnTerrainEffectsAsync(resolution, preShotScene.Wind, _terrainRevision, _reducedMotion).AsTask(),
+                900,
+                "WebGPU terrain effects"));
         }
 
         await RenderSceneCoreAsync(force: true);
+    }
+
+    private async Task<T?> AwaitWithTimeoutAsync<T>(Task<T?> task, int timeoutMs, string operationName)
+    {
+        var timeout = Task.Delay(Math.Max(250, timeoutMs));
+        var completed = await Task.WhenAny(task, timeout);
+        if (completed == task)
+        {
+            return await task;
+        }
+
+        _state?.EventLog.Add($"Timed out waiting for {operationName}; continuing UI flow.");
+        _ = task.ContinueWith(static pending =>
+        {
+            _ = pending.Exception;
+        }, TaskContinuationOptions.OnlyOnFaulted);
+        return default;
+    }
+
+    private async Task AwaitWithTimeoutAsync(Task task, int timeoutMs, string operationName)
+    {
+        var timeout = Task.Delay(Math.Max(250, timeoutMs));
+        var completed = await Task.WhenAny(task, timeout);
+        if (completed == task)
+        {
+            await task;
+            return;
+        }
+
+        _state?.EventLog.Add($"Timed out waiting for {operationName}; continuing UI flow.");
+        _ = task.ContinueWith(static pending =>
+        {
+            _ = pending.Exception;
+        }, TaskContinuationOptions.OnlyOnFaulted);
     }
 
     private static async Task AwaitQuietlyAsync(Task task)
@@ -481,7 +498,10 @@ public partial class Home
         if (includeTerrain) _lastSentTerrainRevision = _terrainRevision;
 
         ApplyStats(stats);
-        ApplyEffectsStats(await Effects.SetSceneAsync(scene, _terrainRevision, _reducedMotion));
+        ApplyEffectsStats(await AwaitWithTimeoutAsync(
+            Effects.SetSceneAsync(scene, _terrainRevision, _reducedMotion).AsTask(),
+            900,
+            "WebGPU scene update"));
     }
 
     private async Task EnsureRendererAsync()
@@ -681,10 +701,13 @@ public partial class Home
         return weaponId == WeaponIds.PeaShell || count < 0 ? "inf" : count.ToString();
     }
 
-    private static int TankHealth(Tank tank) => Math.Max(0, tank.Health);
+    private int DisplayTankHealth(Tank tank, bool player) =>
+        Math.Max(0, player ? _displayPlayerHealth ?? tank.Health : _displayCpuHealth ?? tank.Health);
 
-    private static string TankHealthWidth(Tank tank) =>
-        $"{Math.Clamp(TankHealth(tank) / (float)Math.Max(tank.MaxHealth, 1), 0, 1) * 100:0}%";
+    private string TankHealthWidth(Tank tank, bool player) =>
+        $"{Math.Clamp(DisplayTankHealth(tank, player) / (float)Math.Max(tank.MaxHealth, 1), 0, 1) * 100:0}%";
+
+    private static int TankHealth(Tank tank) => Math.Max(0, tank.Health);
 
     private static string TankShieldWidth(Tank tank) =>
         $"{Math.Clamp(MathF.Max(0, tank.Shield) / 120f, 0, 1) * 100:0}%";
@@ -703,6 +726,7 @@ public partial class Home
         _cpuHurt = TankHealth(_state.CpuTank) < Math.Max(0, cpuHealthBefore);
         _playerShieldHit = _state.PlayerTank.Shield < playerShieldBefore;
         _cpuShieldHit = _state.CpuTank.Shield < cpuShieldBefore;
+        ReleaseDisplayedHealth();
 
         if (!AnyTankFeedback) return;
 
@@ -726,6 +750,18 @@ public partial class Home
         _cpuHurt = false;
         _playerShieldHit = false;
         _cpuShieldHit = false;
+    }
+
+    private void HoldDisplayedHealth(int playerHealthBefore, int cpuHealthBefore)
+    {
+        _displayPlayerHealth = Math.Max(0, playerHealthBefore);
+        _displayCpuHealth = Math.Max(0, cpuHealthBefore);
+    }
+
+    private void ReleaseDisplayedHealth()
+    {
+        _displayPlayerHealth = null;
+        _displayCpuHealth = null;
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs args)
@@ -759,10 +795,6 @@ public partial class Home
                 break;
             case "`":
                 TogglePerf();
-                break;
-            case "h":
-            case "H":
-                ToggleBattlePanel();
                 break;
         }
     }
@@ -808,51 +840,6 @@ public partial class Home
     }
 
     private void ToggleSettings() => _settingsOpen = !_settingsOpen;
-
-    private void ToggleBattlePanel()
-    {
-        if (_state?.Phase == GamePhase.Battle) _battlePanelCollapsed = !_battlePanelCollapsed;
-    }
-
-    private void DockBattlePanelLeft() => DockBattlePanel("left");
-
-    private void DockBattlePanelRight() => DockBattlePanel("right");
-
-    private void DockBattlePanel(string anchor)
-    {
-        if (_state?.Phase != GamePhase.Battle) return;
-
-        _battlePanelAnchor = anchor;
-        ResetBattlePanelDrag();
-    }
-
-    private void BeginBattlePanelDrag(PointerEventArgs args)
-    {
-        if (args.Button != 0) return;
-
-        _battlePanelDragging = true;
-        _battlePanelDragStartX = args.ClientX;
-        _battlePanelDragStartY = args.ClientY;
-        _battlePanelStartOffsetX = _battlePanelOffsetX;
-        _battlePanelStartOffsetY = _battlePanelOffsetY;
-    }
-
-    private void HandleBattlePanelPointerMove(PointerEventArgs args)
-    {
-        if (!_battlePanelDragging) return;
-
-        _battlePanelOffsetX = Math.Clamp(_battlePanelStartOffsetX + args.ClientX - _battlePanelDragStartX, -760, 760);
-        _battlePanelOffsetY = Math.Clamp(_battlePanelStartOffsetY + args.ClientY - _battlePanelDragStartY, -320, 320);
-    }
-
-    private void EndBattlePanelDrag(PointerEventArgs args) => _battlePanelDragging = false;
-
-    private void ResetBattlePanelDrag()
-    {
-        _battlePanelDragging = false;
-        _battlePanelOffsetX = 0;
-        _battlePanelOffsetY = 0;
-    }
 
     private async Task ApplyAudioSettingsAsync()
     {
@@ -968,8 +955,15 @@ public partial class Home
         _effectPostProcessMs = stats.PostProcessMs;
         _effectSourceCopyMs = stats.SourceCopyMs;
         _effectParticleCount = stats.ParticleCount;
+        _effectActiveParticleCount = stats.ActiveParticleCount;
+        _effectParticleCapacity = stats.ParticleCapacity;
         _effectRadialEffectCount = stats.RadialEffectCount;
         _effectSpawnCount = stats.SpawnCount;
+        _effectOverlayScale = stats.OverlayScale;
+        _effectCanvasPixelRatio = stats.CanvasPixelRatio;
+        _effectSourceCopyCadence = stats.SourceCopyCadence;
+        _effectGpuQueueMs = stats.GpuQueueMs;
+        _effectPerfMode = string.IsNullOrWhiteSpace(stats.PerfMode) ? "adaptive" : stats.PerfMode;
         _effectQualityTier = string.IsNullOrWhiteSpace(stats.QualityTier) ? "n/a" : stats.QualityTier;
         _effectFallbackReason = stats.FallbackReason;
     }

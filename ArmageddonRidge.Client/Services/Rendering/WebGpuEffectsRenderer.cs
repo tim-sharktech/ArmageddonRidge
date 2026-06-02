@@ -9,6 +9,7 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
 {
     private IJSObjectReference? _module;
     private WebGpuEffectsStats _stats = new();
+    private int _lastEffectsTerrainRevision = int.MinValue;
 
     public async ValueTask<WebGpuEffectsStats?> InitializeAsync(ElementReference baseCanvas, ElementReference effectsCanvas, bool enabled)
     {
@@ -59,10 +60,11 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
         {
             _stats = await _module.InvokeAsync<WebGpuEffectsStats>(
                     "setScene",
-                    scene,
+                    BuildEffectsScenePayload(scene, terrainRevision),
                     terrainRevision,
                     new { reducedMotion })
                 ?? _stats;
+            _lastEffectsTerrainRevision = terrainRevision;
         }
         catch (JSException ex)
         {
@@ -197,6 +199,27 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
             Wind = wind,
             TerrainRevision = terrainRevision,
             ReducedMotion = reducedMotion
+        };
+
+    private object BuildEffectsScenePayload(RenderScene scene, int terrainRevision) =>
+        new
+        {
+            scene.World,
+            Terrain = terrainRevision == _lastEffectsTerrainRevision ? null : scene.Terrain,
+            scene.Weather,
+            scene.Wind,
+            scene.Radiation,
+            Player = TankPayload(scene.Player),
+            Cpu = TankPayload(scene.Cpu)
+        };
+
+    private static object TankPayload(RenderTank tank) =>
+        new
+        {
+            tank.Id,
+            tank.X,
+            tank.Y,
+            tank.IsCpu
         };
 
     private static object[] ExplosionPayload(IReadOnlyList<ExplosionResult> explosions)

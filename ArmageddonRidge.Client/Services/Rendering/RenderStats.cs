@@ -34,6 +34,13 @@ public sealed record WebGpuEffectsStats
     public int ParticleCount { get; init; }
     public int RadialEffectCount { get; init; }
     public int SpawnCount { get; init; }
+    public int ActiveParticleCount { get; init; }
+    public int ParticleCapacity { get; init; }
+    public double OverlayScale { get; init; } = 1;
+    public double CanvasPixelRatio { get; init; } = 1;
+    public int SourceCopyCadence { get; init; }
+    public double GpuQueueMs { get; init; }
+    public string PerfMode { get; init; } = "adaptive";
     public string QualityTier { get; init; } = "n/a";
     public string FallbackReason { get; init; } = "Not initialized";
 }

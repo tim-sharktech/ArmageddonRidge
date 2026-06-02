@@ -19,12 +19,26 @@ public sealed class CpuOpponent(WeaponCatalog weapons, ProjectileSimulator simul
     /// <summary>
     /// Chooses the CPU weapon, angle, and power for the current turn.
     /// </summary>
-    public CpuShotPlan PlanShot(GameState state, MatchSettings settings)
+    public CpuShotPlan PlanShot(GameState state, MatchSettings settings) =>
+        PlanShotCoreAsync(state, settings, 0, CancellationToken.None).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Chooses the CPU weapon, angle, and power while yielding periodically so browser animation can keep ticking.
+    /// </summary>
+    public ValueTask<CpuShotPlan> PlanShotAsync(GameState state, MatchSettings settings, CancellationToken cancellationToken = default) =>
+        PlanShotCoreAsync(state, settings, 24, cancellationToken);
+
+    private async ValueTask<CpuShotPlan> PlanShotCoreAsync(
+        GameState state,
+        MatchSettings settings,
+        int yieldEveryCandidates,
+        CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
         var profile = CpuDifficultyProfile.For(settings.Difficulty);
         var candidates = _weapons.All;
         var best = new CpuShotPlan(WeaponIds.PeaShell, 140, 60, "Calculating... emotionally.", 0, 0);
+        var scoredCandidates = 0;
 
         for (var candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
         {
@@ -48,35 +62,58 @@ public sealed class CpuOpponent(WeaponCatalog weapons, ProjectileSimulator simul
                 continue;
             }
 
-            var angleStart = 92;
-            var angleEnd = 176;
+            const int angleStart = 92;
+            const int angleEnd = 176;
+            const int powerStart = 25;
+            const int powerEnd = 100;
             var angleStep = profile.AngleStep;
             var powerStep = profile.PowerStep;
+            var coarseAngleStep = Math.Max(angleStep * 2, angleStep + 2);
+            var coarsePowerStep = Math.Max(powerStep * 2, powerStep + 4);
+            var topCandidates = new List<CpuPlanningCandidate>(profile.RefineCandidates);
 
-            for (var angle = angleStart; angle <= angleEnd; angle += angleStep)
+            for (var angle = angleStart; angle <= angleEnd; angle += coarseAngleStep)
             {
-                for (var power = 25; power <= 100; power += powerStep)
+                for (var power = powerStart; power <= powerEnd; power += coarsePowerStep)
                 {
-                    var simulation = _simulator.SimulateForPlanning(state.Terrain, state.CpuTank, state.PlayerTank, weapon, angle, power, state.Wind, 60 * 7);
-                    var enemyPotential = MathF.Max(0, weapon.BlastRadius - simulation.NearestOpponentDistance);
-                    var selfRisk = MathF.Max(0, weapon.BlastRadius - simulation.NearestOwnerDistance);
-                    var score = (enemyPotential * 10f)
-                        - (selfRisk * profile.SelfDamagePenalty)
-                        - (weapon.Cost * profile.CostPenalty)
-                        + (simulation.StopReason is ProjectileStopReason.TankHit or ProjectileStopReason.ShieldHit ? 400 : 0);
+                    if (yieldEveryCandidates > 0 && ++scoredCandidates % yieldEveryCandidates == 0)
+                        await Task.Delay(1, cancellationToken);
 
-                    if (weapon.BehaviorType == WeaponBehaviorType.DroneSwarm)
-                        score += 60;
-
-                    if (weapon.Category == WeaponCategory.Nuclear && selfRisk / MathF.Max(weapon.BlastRadius, 1) > profile.NukeSelfRiskTolerance)
-                        score -= 900;
-
-                    score += DeterministicNoise(state, weapon.Id, angle, power, 0) * profile.Noise;
-                    if (score > best.Score)
+                    var candidate = ScoreCandidate(state, weapon, profile, angle, power);
+                    AddTopCandidate(topCandidates, candidate, profile.RefineCandidates);
+                    if (candidate.Score > best.Score)
                     {
                         var angleNoise = Noise(state, weapon.Id, angle, power, 1, profile.AngleNoise);
                         var powerNoise = Noise(state, weapon.Id, angle, power, 2, profile.PowerNoise);
-                        best = new CpuShotPlan(weapon.Id, angle + angleNoise, power + (int)powerNoise, TauntFor(state.CpuTank, weapon), score, watch.Elapsed.TotalMilliseconds);
+                        best = new CpuShotPlan(weapon.Id, angle + angleNoise, power + (int)powerNoise, TauntFor(state.CpuTank, weapon), candidate.Score, watch.Elapsed.TotalMilliseconds);
+                    }
+                }
+            }
+
+            for (var topIndex = 0; topIndex < topCandidates.Count; topIndex++)
+            {
+                var seed = topCandidates[topIndex];
+                var refineAngleStart = Math.Max(angleStart, seed.Angle - coarseAngleStep);
+                var refineAngleEnd = Math.Min(angleEnd, seed.Angle + coarseAngleStep);
+                var refinePowerStart = Math.Max(powerStart, seed.Power - coarsePowerStep);
+                var refinePowerEnd = Math.Min(powerEnd, seed.Power + coarsePowerStep);
+
+                for (var angle = refineAngleStart; angle <= refineAngleEnd; angle += angleStep)
+                {
+                    for (var power = refinePowerStart; power <= refinePowerEnd; power += powerStep)
+                    {
+                        if (yieldEveryCandidates > 0 && ++scoredCandidates % yieldEveryCandidates == 0)
+                            await Task.Delay(1, cancellationToken);
+
+                        var candidate = ScoreCandidate(state, weapon, profile, angle, power);
+                        if (candidate.Score <= best.Score)
+                            continue;
+
+                        var angleNoise = Noise(state, weapon.Id, angle, power, 1, profile.AngleNoise);
+                        var powerNoise = Noise(state, weapon.Id, angle, power, 2, profile.PowerNoise);
+                        best = new CpuShotPlan(weapon.Id, angle + angleNoise, power + (int)powerNoise, TauntFor(state.CpuTank, weapon), candidate.Score, watch.Elapsed.TotalMilliseconds);
+                        if (profile.GoodEnoughScore > 0 && candidate.DirectHit && candidate.Score >= profile.GoodEnoughScore)
+                            return best with { PlanningMs = watch.Elapsed.TotalMilliseconds };
                     }
                 }
             }
@@ -84,6 +121,50 @@ public sealed class CpuOpponent(WeaponCatalog weapons, ProjectileSimulator simul
 
         watch.Stop();
         return best with { PlanningMs = watch.Elapsed.TotalMilliseconds };
+    }
+
+    private ProjectilePlanningSimulation SimulateCandidate(GameState state, WeaponDefinition weapon, int angle, int power) =>
+        _simulator.SimulateForPlanning(state.Terrain, state.CpuTank, state.PlayerTank, weapon, angle, power, state.Wind, 60 * 7);
+
+    private CpuPlanningCandidate ScoreCandidate(GameState state, WeaponDefinition weapon, CpuDifficultyProfile profile, int angle, int power)
+    {
+        var simulation = SimulateCandidate(state, weapon, angle, power);
+        var enemyPotential = MathF.Max(0, weapon.BlastRadius - simulation.NearestOpponentDistance);
+        var selfRisk = MathF.Max(0, weapon.BlastRadius - simulation.NearestOwnerDistance);
+        var directHit = simulation.StopReason is ProjectileStopReason.TankHit or ProjectileStopReason.ShieldHit;
+        var score = (enemyPotential * 10f)
+            - (selfRisk * profile.SelfDamagePenalty)
+            - (weapon.Cost * profile.CostPenalty)
+            + (directHit ? 400 : 0);
+
+        if (weapon.BehaviorType == WeaponBehaviorType.DroneSwarm)
+            score += 60;
+
+        if (weapon.Category == WeaponCategory.Nuclear && selfRisk / MathF.Max(weapon.BlastRadius, 1) > profile.NukeSelfRiskTolerance)
+            score -= 900;
+
+        score += DeterministicNoise(state, weapon.Id, angle, power, 0) * profile.Noise;
+        return new CpuPlanningCandidate(angle, power, score, directHit);
+    }
+
+    private static void AddTopCandidate(List<CpuPlanningCandidate> candidates, CpuPlanningCandidate candidate, int maxCount)
+    {
+        var insertAt = candidates.Count;
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            if (candidate.Score > candidates[i].Score)
+            {
+                insertAt = i;
+                break;
+            }
+        }
+
+        if (insertAt >= maxCount)
+            return;
+
+        candidates.Insert(insertAt, candidate);
+        if (candidates.Count > maxCount)
+            candidates.RemoveAt(candidates.Count - 1);
     }
 
     private static float Noise(GameState state, string weaponId, int angle, int power, int salt, float magnitude) =>
@@ -139,6 +220,8 @@ public sealed record CpuShotPlan(string WeaponId, float Angle, int Power, string
 internal sealed record CpuDifficultyProfile(
     int AngleStep,
     int PowerStep,
+    int RefineCandidates,
+    float GoodEnoughScore,
     float AngleNoise,
     float PowerNoise,
     float Noise,
@@ -148,11 +231,13 @@ internal sealed record CpuDifficultyProfile(
 {
     public static CpuDifficultyProfile For(Difficulty difficulty) => difficulty switch
     {
-        Difficulty.Rookie => new(8, 12, 16, 20, 120, 8, 0.35f, 0.18f),
-        Difficulty.Normal => new(5, 8, 8, 10, 70, 15, 0.18f, 0.28f),
-        Difficulty.Veteran => new(4, 6, 4, 6, 38, 20, 0.12f, 0.35f),
-        Difficulty.Maniac => new(4, 6, 7, 8, 55, 11, 0.08f, 0.46f),
-        Difficulty.Oracle => new(2, 4, 2, 3, 12, 22, 0.05f, 0.32f),
-        _ => new(5, 8, 8, 10, 70, 15, 0.18f, 0.28f)
+        Difficulty.Rookie => new(8, 12, 2, 420, 16, 20, 120, 8, 0.35f, 0.18f),
+        Difficulty.Normal => new(5, 8, 3, 520, 8, 10, 70, 15, 0.18f, 0.28f),
+        Difficulty.Veteran => new(4, 6, 4, 660, 4, 6, 38, 20, 0.12f, 0.35f),
+        Difficulty.Maniac => new(4, 6, 4, 620, 7, 8, 55, 11, 0.08f, 0.46f),
+        Difficulty.Oracle => new(2, 4, 6, 0, 2, 3, 12, 22, 0.05f, 0.32f),
+        _ => new(5, 8, 3, 520, 8, 10, 70, 15, 0.18f, 0.28f)
     };
 }
+
+internal sealed record CpuPlanningCandidate(int Angle, int Power, float Score, bool DirectHit);
