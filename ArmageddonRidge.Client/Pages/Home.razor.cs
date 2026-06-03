@@ -130,6 +130,8 @@ public partial class Home
 
     private string RoundResult => _state?.PlayerTank.IsDestroyed == true ? "CPU wins the ridge" : "Player wins the ridge";
 
+    private string LatestCombatEvent => _state?.EventLog.LastOrDefault() ?? string.Empty;
+
     private string SimdStatusLabel => _renderMode == RenderMode.Hybrid
         ? "N/A"
         : _simdHardwareAccelerated ? "Enabled" : "Disabled";

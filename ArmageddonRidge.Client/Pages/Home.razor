@@ -116,6 +116,10 @@
                         <span>Trail: @_state.LastPerformance.TrailPoints</span>
                     </div>
                 }
+                @if (VisiblePhase == GamePhase.Battle && !string.IsNullOrWhiteSpace(LatestCombatEvent))
+                {
+                    <div class="taunt" aria-live="polite">@LatestCombatEvent</div>
+                }
                 @if (VisiblePhase == GamePhase.Battle)
                 {
                     <div class="battle-console" aria-label="Battle controls">

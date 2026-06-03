@@ -839,7 +839,10 @@ select {
 .taunt {
     right: 18px;
     top: 18px;
-    max-width: 260px;
+    max-width: min(360px, calc(100% - 36px));
+    overflow-wrap: anywhere;
+    font-size: 0.86rem;
+    font-weight: 800;
 }
 
 .settings-drawer {
@@ -1046,6 +1049,13 @@ pre {
     .battlefield-fps-button {
         top: 104px;
         right: 8px;
+    }
+
+    .taunt {
+        top: 82px;
+        right: 8px;
+        max-width: calc(100% - 16px);
+        font-size: 0.74rem;
     }
 
     .battle-console {
