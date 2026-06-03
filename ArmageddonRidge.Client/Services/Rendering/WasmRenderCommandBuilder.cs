@@ -193,10 +193,66 @@ public sealed class WasmRenderCommandBuilder
         for (var i = 0; i < explosions.Count; i++)
         {
             var explosion = explosions[i];
+            var kind = explosion.VisualKind ?? string.Empty;
+            var normalizedKind = kind.ToLowerInvariant();
             var radius = MathF.Max(8, explosion.Radius * MathF.Sin(progress * MathF.PI * 0.5f));
-            commands.Add(new RenderCommand { Op = "circle", X = explosion.X, Y = explosion.Y, R = radius, Fill = "rgba(242,193,78,0.32)", Stroke = "rgba(255,248,217,0.75)", LineWidth = 3 });
-            if (explosion.Nuclear) commands.Add(new RenderCommand { Op = "circle", X = explosion.X, Y = explosion.Y - radius * 0.7f, R = radius * 0.6f, Fill = "rgba(255,248,217,0.24)", Stroke = "rgba(236,106,92,0.58)", LineWidth = 3 });
+            var style = ExplosionStyle(normalizedKind, explosion);
+            commands.Add(new RenderCommand { Op = "circle", X = explosion.X, Y = explosion.Y, R = radius, Fill = style.Fill, Stroke = style.Stroke, LineWidth = style.LineWidth });
+
+            if (explosion.Nuclear)
+            {
+                commands.Add(new RenderCommand { Op = "circle", X = explosion.X, Y = explosion.Y - radius * 0.7f, R = radius * 0.6f, Fill = "rgba(255,248,217,0.24)", Stroke = "rgba(236,106,92,0.58)", LineWidth = 3 });
+                continue;
+            }
+
+            if (normalizedKind.Contains("shield", StringComparison.Ordinal))
+            {
+                commands.Add(new RenderCommand { Op = "ellipse", X = explosion.X, Y = explosion.Y, W = radius * 1.45f, H = radius * 0.82f, Fill = "rgba(117,213,255,0.10)", Stroke = "rgba(136,226,255,0.82)", LineWidth = 2.5f });
+            }
+            else if (normalizedKind.Contains("patriot", StringComparison.Ordinal))
+            {
+                commands.Add(new RenderCommand { Op = "line", X = explosion.X - radius * 0.7f, Y = explosion.Y, X2 = explosion.X + radius * 0.7f, Y2 = explosion.Y, Stroke = "rgba(125,220,255,0.86)", LineWidth = 3 });
+                commands.Add(new RenderCommand { Op = "line", X = explosion.X, Y = explosion.Y - radius * 0.7f, X2 = explosion.X, Y2 = explosion.Y + radius * 0.7f, Stroke = "rgba(125,220,255,0.70)", LineWidth = 2 });
+            }
+            else if (normalizedKind.Contains("penetrator", StringComparison.Ordinal))
+            {
+                commands.Add(new RenderCommand { Op = "line", X = explosion.X - radius * 0.55f, Y = explosion.Y + radius * 0.45f, X2 = explosion.X + radius * 0.55f, Y2 = explosion.Y - radius * 0.45f, Stroke = "rgba(255,248,217,0.80)", LineWidth = 4 });
+            }
+            else if (normalizedKind.Contains("lava", StringComparison.Ordinal) || normalizedKind.Contains("fire", StringComparison.Ordinal))
+            {
+                commands.Add(new RenderCommand { Op = "circle", X = explosion.X, Y = explosion.Y + radius * 0.15f, R = radius * 0.55f, Fill = "rgba(255,95,36,0.30)", Stroke = "rgba(255,183,80,0.66)", LineWidth = 2 });
+            }
+            else if (normalizedKind.Contains("laser", StringComparison.Ordinal))
+            {
+                commands.Add(new RenderCommand { Op = "circle", X = explosion.X, Y = explosion.Y, R = radius * 0.38f, Fill = "rgba(123,243,255,0.30)", Stroke = "rgba(255,255,255,0.78)", LineWidth = 2 });
+            }
         }
+    }
+
+    private static (string Fill, string Stroke, float LineWidth) ExplosionStyle(string normalizedKind, WasmExplosion explosion)
+    {
+        if (explosion.Nuclear)
+            return ("rgba(255,248,217,0.36)", "rgba(236,106,92,0.82)", 4f);
+
+        if (normalizedKind.Contains("shield", StringComparison.Ordinal))
+            return ("rgba(117,213,255,0.18)", "rgba(136,226,255,0.88)", 3f);
+
+        if (normalizedKind.Contains("patriot", StringComparison.Ordinal))
+            return ("rgba(125,220,255,0.24)", "rgba(255,248,217,0.82)", 3f);
+
+        if (normalizedKind.Contains("penetrator", StringComparison.Ordinal))
+            return ("rgba(214,196,170,0.28)", "rgba(255,248,217,0.78)", 3.5f);
+
+        if (normalizedKind.Contains("lava", StringComparison.Ordinal) || normalizedKind.Contains("fire", StringComparison.Ordinal))
+            return ("rgba(255,95,36,0.34)", "rgba(255,183,80,0.84)", 3f);
+
+        if (normalizedKind.Contains("laser", StringComparison.Ordinal))
+            return ("rgba(123,243,255,0.26)", "rgba(255,255,255,0.78)", 2.5f);
+
+        if (explosion.Dirt || normalizedKind.Contains("dirt", StringComparison.Ordinal))
+            return ("rgba(145,108,71,0.34)", "rgba(219,181,116,0.72)", 3f);
+
+        return ("rgba(242,193,78,0.32)", "rgba(255,248,217,0.75)", 3f);
     }
 
     private static void AddWind(List<RenderCommand> commands, RenderScene scene)

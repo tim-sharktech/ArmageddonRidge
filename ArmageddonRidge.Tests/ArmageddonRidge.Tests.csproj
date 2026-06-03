@@ -22,4 +22,9 @@
     <ProjectReference Include="..\ArmageddonRidge.Core\ArmageddonRidge.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\ArmageddonRidge.Client\Services\Rendering\RenderScene.cs" Link="ClientRendering\RenderScene.cs" />
+    <Compile Include="..\ArmageddonRidge.Client\Services\Rendering\WasmRenderCommandBuilder.cs" Link="ClientRendering\WasmRenderCommandBuilder.cs" />
+  </ItemGroup>
+
 </Project>
