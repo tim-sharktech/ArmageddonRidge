@@ -106,8 +106,13 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
             highImpactShake = true;
         }
 
-        if (Number(explosion.triggerIndex ?? -1) >= 0) {
-            stagedExplosions.push(explosion);
+        const triggerIndex = Number(explosion.triggerIndex ?? -1);
+        if (triggerIndex >= 0) {
+            stagedExplosions.push({
+                ...explosion,
+                triggerIndex,
+                playbackKey: `${triggerIndex}:${Math.round(explosion.x)}:${Math.round(explosion.y)}`
+            });
         } else {
             finalExplosions.push(explosion);
         }
@@ -2009,12 +2014,12 @@ function drawTriggeredExplosions(explosions, visibleTrailCount, now, starts) {
     ctx.save();
     setWorldTransform();
     for (const explosion of explosions) {
-        const triggerIndex = Number(explosion.triggerIndex ?? -1);
+        const triggerIndex = explosion.triggerIndex;
         if (triggerIndex < 0 || visibleTrailCount <= triggerIndex) {
             continue;
         }
 
-        const key = `${triggerIndex}:${Math.round(explosion.x)}:${Math.round(explosion.y)}`;
+        const key = explosion.playbackKey;
         if (!starts.has(key)) {
             starts.set(key, now);
         }
