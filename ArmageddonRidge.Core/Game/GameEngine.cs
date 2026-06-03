@@ -463,17 +463,20 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
             previous = point;
         }
 
-        if (ProjectileSimulator.SweptHitsTankOrShield(origin, target, opponent, terrain, BeamPadding, out var laserHit, out _))
+        if (ProjectileSimulator.SweptHitsTankOrShield(origin, target, opponent, terrain, BeamPadding, out var laserHit, out var stopReason))
         {
             trail[^1] = laserHit;
-            return new WeaponSimulation(trail, laserHit, [LaserExplosion(laserHit, weapon)]);
+            var visualKind = stopReason == ProjectileStopReason.ShieldHit
+                ? ShotVisualKind.ShieldHit
+                : ShotVisualKind.Laser;
+            return new WeaponSimulation(trail, laserHit, [LaserExplosion(laserHit, weapon, visualKind)]);
         }
 
         return new WeaponSimulation(trail, trail[^1], []);
     }
 
-    private static ExplosionResult LaserExplosion(Vector2 center, WeaponDefinition weapon) =>
-        new(center, weapon.BlastRadius, weapon.TerrainRadius, 0, 0, false, false, [], ShotVisualKind.Laser);
+    private static ExplosionResult LaserExplosion(Vector2 center, WeaponDefinition weapon, ShotVisualKind visualKind = ShotVisualKind.Laser) =>
+        new(center, weapon.BlastRadius, weapon.TerrainRadius, 0, 0, false, false, [], visualKind);
 
     private static Vector2 LaserOrigin(Tank owner, Tank opponent)
     {

@@ -97,6 +97,7 @@ public sealed class HybridCanvasRenderer(IJSRuntime js) : IGameRenderer
                 missile = explosion.VisualKind == ShotVisualKind.Missile,
                 drone = explosion.VisualKind == ShotVisualKind.DroneSwarm,
                 patriotIntercept = explosion.VisualKind == ShotVisualKind.PatriotIntercept,
+                shieldHit = explosion.VisualKind == ShotVisualKind.ShieldHit,
                 triggerIndex = explosion.TriggerTrailIndex
             };
         }

@@ -471,6 +471,31 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void LaserShieldHitsUseShieldImpactVisual()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        var heights = Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray();
+        state.Terrain.CopyFrom(new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights));
+        state.PlayerTank.Position = new Vector2(160, 620);
+        state.CpuTank.Position = new Vector2(320, 620);
+        state.CpuTank.Shield = 120;
+        state.PlayerTank.AddWeapon(WeaponIds.LaserLance, 1);
+        state.SelectedWeaponId = WeaponIds.LaserLance;
+        state.Wind = GameConstants.WindMax;
+        engine.StartBattle(state);
+
+        var result = engine.FireCurrentTurn(state, settings, angle: 85, power: 1);
+
+        Assert.Equal(WeaponIds.LaserLance, result.WeaponId);
+        Assert.Equal(ShotVisualKind.Laser, result.VisualKind);
+        Assert.Equal(ShotVisualKind.ShieldHit, Assert.Single(result.Explosions).VisualKind);
+        Assert.True(state.CpuTank.Shield < 120);
+        Assert.True(state.CpuTank.Health < state.CpuTank.MaxHealth);
+    }
+
+    [Fact]
     public void PatriotBatteryPurchasesStackAndConsumeOneAtATime()
     {
         var engine = CreateEngine();

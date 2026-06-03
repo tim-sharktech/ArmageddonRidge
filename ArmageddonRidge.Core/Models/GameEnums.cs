@@ -307,6 +307,11 @@ public enum ShotVisualKind
     PatriotIntercept,
 
     /// <summary>
+    /// Shield absorption impact effect.
+    /// </summary>
+    ShieldHit,
+
+    /// <summary>
     /// First-stage penetrator impact effect.
     /// </summary>
     PenetratorPrimary,
