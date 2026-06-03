@@ -9,7 +9,6 @@ public sealed class WasmRenderCommandBuilder
 {
     private float[]? _cachedTerrain;
     private float[] _cachedTerrainPoints = [];
-    private int _cachedTerrainWidth;
     private int _cachedTerrainHeight;
 
     public RenderFrame BuildFrame(RenderScene scene, IReadOnlyList<RenderPoint>? trail = null, IReadOnlyList<WasmExplosion>? explosions = null, float progress = 1)
@@ -81,7 +80,6 @@ public sealed class WasmRenderCommandBuilder
         if (terrain is not null)
         {
             _cachedTerrain = terrain;
-            _cachedTerrainWidth = scene.World.Width;
             _cachedTerrainHeight = scene.World.Height;
             _cachedTerrainPoints = BuildTerrainPolygon(terrain, scene.World.Height);
         }
