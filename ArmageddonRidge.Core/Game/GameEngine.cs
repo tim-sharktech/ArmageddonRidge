@@ -240,17 +240,19 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         }
 
         var winner = Winner(state);
+        if (winner is null)
+        {
+            state.CurrentTurn = TurnManager.OpponentOf(state.CurrentTurn);
+            state.Wind = NextWind(state);
+            ApplyStartOfTurnEffects(state);
+            winner = Winner(state);
+        }
+
         if (winner is not null)
         {
             Economy.AwardRound(state, winner.Value);
             state.Phase = GamePhase.RoundOver;
             events.Add(winner == TurnOwner.Player ? "Victory. The ridge salutes your math." : "Defeat. The CPU is insufferable now.");
-        }
-        else
-        {
-            state.CurrentTurn = TurnManager.OpponentOf(state.CurrentTurn);
-            state.Wind = NextWind(state);
-            ApplyStartOfTurnEffects(state);
         }
 
         var perf = new PerformanceSample(simulationWatch.Elapsed.TotalMilliseconds, terrainWatch.Elapsed.TotalMilliseconds, cpuPlanningMs, simulation.Trail.Count, touched);

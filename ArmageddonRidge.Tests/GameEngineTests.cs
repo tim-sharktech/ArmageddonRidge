@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using ArmageddonRidge.Core;
+using ArmageddonRidge.Core.AI;
 using ArmageddonRidge.Core.Content;
 using ArmageddonRidge.Core.Game;
 using ArmageddonRidge.Core.Models;
@@ -525,6 +526,48 @@ public sealed class GameEngineTests
         Assert.True(result.Trail.Min(static point => point.Y) < targetBeforeShot.Y - 100);
         Assert.True(Vector2.Distance(result.Explosions[0].Center, targetBeforeShot) < 0.01f);
         Assert.True(state.CpuTank.Health < state.CpuTank.MaxHealth);
+    }
+
+    [Fact]
+    public void TurnStartHazardDamageCanEndRoundAfterPlayerShot()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        engine.StartBattle(state);
+        state.CpuTank.MaxHealth = 500;
+        state.CpuTank.Health = 500;
+        state.RadiationZones.Add(new RadiationZone(state.CpuTank.Center, 140, 2, 600, ShotVisualKind.Lava));
+
+        var result = engine.FireCurrentTurn(state, settings, angle: 85, power: 1);
+
+        Assert.True(result.RoundEnded);
+        Assert.Equal(TurnOwner.Player, result.Winner);
+        Assert.Equal(GamePhase.RoundOver, state.Phase);
+        Assert.True(state.CpuTank.IsDestroyed);
+        Assert.Contains(result.Events, e => e.Contains("Victory", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TurnStartHazardDamageCanEndRoundAfterCpuShot()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        engine.StartBattle(state);
+        state.CurrentTurn = TurnOwner.Cpu;
+        state.PlayerTank.MaxHealth = 500;
+        state.PlayerTank.Health = 500;
+        state.RadiationZones.Add(new RadiationZone(state.PlayerTank.Center, 140, 2, 600, ShotVisualKind.Nuclear));
+        var plan = new CpuShotPlan(WeaponIds.PeaShell, 95, 1, "", 0, 0);
+
+        var result = engine.FirePlannedCpuTurn(state, settings, plan);
+
+        Assert.True(result.RoundEnded);
+        Assert.Equal(TurnOwner.Cpu, result.Winner);
+        Assert.Equal(GamePhase.RoundOver, state.Phase);
+        Assert.True(state.PlayerTank.IsDestroyed);
+        Assert.Contains(result.Events, e => e.Contains("Defeat", StringComparison.Ordinal));
     }
 
     private static GameEngine CreateEngine() => new(new WeaponCatalog(), new UpgradeCatalog());
