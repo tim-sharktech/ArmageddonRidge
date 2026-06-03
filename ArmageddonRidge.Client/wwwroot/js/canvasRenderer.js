@@ -28,8 +28,10 @@ let cachedTerrainTopLength = -1;
 let cachedTerrainTopWorldHeight = 0;
 let cachedTerrainTop = 0;
 let rafId = 0;
+let lastAmbientRedraw = 0;
 let shotInProgress = false;
 const spriteManifestVersion = "2026-05-04-genesis-v7";
+const ambientRedrawIntervalMs = 1000 / 30;
 const patriotInterceptDurationScale = 2.6;
 const patriotInterceptMinDuration = 2900;
 const patriotInterceptMaxDuration = 3400;
@@ -71,8 +73,10 @@ export function render(scene) {
     lastScene = renderScene;
     sizeCanvas();
     drawScene(renderScene, 0, 0);
-    updateStats();
+    const finished = performance.now();
+    updateStats(finished);
     renderMs = performance.now() - started;
+    lastAmbientRedraw = finished;
     return getStats();
 }
 
@@ -2464,8 +2468,7 @@ function sizeCanvas() {
     return false;
 }
 
-function updateStats() {
-    const now = performance.now();
+function updateStats(now = performance.now()) {
     frameMs = now - lastFrame;
     lastFrame = now;
     fps = (fps * 0.9) + ((1000 / Math.max(frameMs, 1)) * 0.1);
@@ -2477,14 +2480,17 @@ function startStatsLoop() {
     }
 
     const tick = () => {
+        const now = performance.now();
         const resized = sizeCanvas();
-        if (lastScene && !shotInProgress && resized) {
+        const redrawAmbient = lastScene && !shotInProgress && (resized || now - lastAmbientRedraw >= ambientRedrawIntervalMs);
+        if (redrawAmbient) {
             const started = performance.now();
             drawScene(lastScene, 0, 0);
             renderMs = performance.now() - started;
+            lastAmbientRedraw = now;
         }
 
-        updateStats();
+        updateStats(now);
         rafId = requestAnimationFrame(tick);
     };
 

@@ -55,6 +55,7 @@ public sealed class HeadlessEdgeStartupTests
         Assert.True(result.BattleConsoleRendered, "The bottom battle console did not render after starting a duel.");
         Assert.True(result.BattlefieldFpsButtonRendered, "The battlefield FPS button did not render after starting a duel.");
         Assert.True(result.BattlefieldFpsButtonShowsValue, "The battlefield FPS button did not show text like '58 FPS'.");
+        Assert.True(result.BattlefieldCanvasChangedAfterAmbientTick, "The battlefield canvas did not update while idle; clouds and weather may be frozen.");
         Assert.True(result.PerfOverlayOpened, "The FPS overlay did not open after clicking FPS.");
         Assert.True(result.PerfOverlayClosed, "The FPS overlay did not close after clicking FPS a second time.");
         Assert.True(result.BrowserResponsiveAfterPerfClose, "The browser did not respond after closing the FPS overlay.");
@@ -256,6 +257,13 @@ public sealed class HeadlessEdgeStartupTests
             var battlefieldFpsButtonShowsValue = await client.EvaluateBooleanAsync("""
                 /^\d+ FPS$/.test(document.querySelector('.battlefield-fps-button')?.textContent?.trim() ?? '')
                 """);
+            var firstBattlefieldFrame = await client.EvaluateStringAsync("document.querySelector('canvas.battlefield')?.toDataURL('image/png') ?? ''");
+            await Task.Delay(TimeSpan.FromMilliseconds(1200));
+            var secondBattlefieldFrame = await client.EvaluateStringAsync("document.querySelector('canvas.battlefield')?.toDataURL('image/png') ?? ''");
+            var battlefieldCanvasChangedAfterAmbientTick =
+                firstBattlefieldFrame.Length > 0 &&
+                secondBattlefieldFrame.Length > 0 &&
+                !string.Equals(firstBattlefieldFrame, secondBattlefieldFrame, StringComparison.Ordinal);
             var perfOverlayOpened = false;
             var perfOverlayClosed = false;
             var browserResponsiveAfterPerfClose = false;
@@ -277,6 +285,7 @@ public sealed class HeadlessEdgeStartupTests
                 battleConsoleRendered,
                 battlefieldFpsButtonRendered,
                 battlefieldFpsButtonShowsValue,
+                battlefieldCanvasChangedAfterAmbientTick,
                 perfOverlayOpened,
                 perfOverlayClosed,
                 browserResponsiveAfterPerfClose,
@@ -401,6 +410,7 @@ public sealed class HeadlessEdgeStartupTests
         bool BattleConsoleRendered,
         bool BattlefieldFpsButtonRendered,
         bool BattlefieldFpsButtonShowsValue,
+        bool BattlefieldCanvasChangedAfterAmbientTick,
         bool PerfOverlayOpened,
         bool PerfOverlayClosed,
         bool BrowserResponsiveAfterPerfClose,
@@ -486,6 +496,19 @@ public sealed class HeadlessEdgeStartupTests
             if (!result.TryGetProperty("result", out var runtimeResult)) return false;
             if (!runtimeResult.TryGetProperty("value", out var value)) return false;
             return value.ValueKind == JsonValueKind.True;
+        }
+
+        public async Task<string> EvaluateStringAsync(string expression)
+        {
+            var result = await SendAsync("Runtime.evaluate", new Dictionary<string, object?>
+            {
+                ["expression"] = expression,
+                ["returnByValue"] = true
+            });
+
+            if (!result.TryGetProperty("result", out var runtimeResult)) return string.Empty;
+            if (!runtimeResult.TryGetProperty("value", out var value)) return string.Empty;
+            return value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : string.Empty;
         }
 
         public async Task ClickButtonByTextAsync(string text)

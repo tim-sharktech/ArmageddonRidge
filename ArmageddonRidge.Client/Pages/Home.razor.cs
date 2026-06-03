@@ -71,6 +71,8 @@ public partial class Home
     private int _lastSentTerrainRevision = -1;
     private CancellationTokenSource? _perfLoop;
     private Task? _perfLoopTask;
+    private CancellationTokenSource? _fpsButtonLoop;
+    private Task? _fpsButtonLoopTask;
     private bool _playerHurt;
     private bool _cpuHurt;
     private bool _playerShieldHit;
@@ -505,6 +507,7 @@ public partial class Home
             Effects.SetSceneAsync(scene, _terrainRevision, _reducedMotion).AsTask(),
             900,
             "WebGPU scene update"));
+        SyncBattleFpsLoop();
     }
 
     private async Task EnsureRendererAsync()
@@ -926,6 +929,7 @@ public partial class Home
 
     public async ValueTask DisposeAsync()
     {
+        StopFpsButtonLoop();
         StopPerfLoop();
         await Effects.DisposeAsync();
         await Renderer.DisposeAsync();
@@ -969,6 +973,78 @@ public partial class Home
         _effectPerfMode = string.IsNullOrWhiteSpace(stats.PerfMode) ? "adaptive" : stats.PerfMode;
         _effectQualityTier = string.IsNullOrWhiteSpace(stats.QualityTier) ? "n/a" : stats.QualityTier;
         _effectFallbackReason = stats.FallbackReason;
+    }
+
+    private void SyncBattleFpsLoop()
+    {
+        if (VisiblePhase == GamePhase.Battle)
+        {
+            StartFpsButtonLoop();
+        }
+        else
+        {
+            StopFpsButtonLoop();
+        }
+    }
+
+    private void StartFpsButtonLoop()
+    {
+        if (_fpsButtonLoopTask is { IsCompleted: false })
+            return;
+
+        _fpsButtonLoop?.Dispose();
+        _fpsButtonLoop = new CancellationTokenSource();
+        _fpsButtonLoopTask = PollFpsButtonAsync(_fpsButtonLoop);
+    }
+
+    private void StopFpsButtonLoop()
+    {
+        if (_fpsButtonLoop is null)
+            return;
+
+        _fpsButtonLoop.Cancel();
+    }
+
+    private async Task PollFpsButtonAsync(CancellationTokenSource source)
+    {
+        var cancellationToken = source.Token;
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(250, cancellationToken);
+
+                if (_showPerf)
+                    continue;
+
+                var rendererStats = await Renderer.GetStatsAsync();
+                if (cancellationToken.IsCancellationRequested) return;
+                ApplyStats(rendererStats);
+
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (JSException ex)
+        {
+            _state?.EventLog.Add($"FPS polling stopped: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            _state?.EventLog.Add($"FPS polling stopped: {ex.Message}");
+        }
+        finally
+        {
+            if (ReferenceEquals(_fpsButtonLoop, source))
+            {
+                _fpsButtonLoop = null;
+                _fpsButtonLoopTask = null;
+            }
+
+            source.Dispose();
+        }
     }
 
     private void StartPerfLoop()
