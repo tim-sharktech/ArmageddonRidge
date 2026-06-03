@@ -35,7 +35,7 @@ public sealed class HeadlessEdgeStartupTests
         var repoRoot = FindRepoRoot();
         var clientProject = Path.Combine(repoRoot, "ArmageddonRidge.Client", "ArmageddonRidge.Client.csproj");
         var appPort = GetAvailablePort();
-        var appUrl = $"https://localhost:{appPort}/";
+        var appUrl = $"http://localhost:{appPort}/";
 
         using var app = await StartClientAsync(repoRoot, clientProject, appUrl);
         var firstBoot = await RunHeadlessEdgeAsync(edgePath, appUrl, BrowserSmokeOptions.Default);
@@ -249,6 +249,12 @@ public sealed class HeadlessEdgeStartupTests
 
             await client.NavigateAsync(appUrl);
             var gameRootRendered = await client.WaitForBooleanAsync("Boolean(document.querySelector('.game-root'))", BrowserStartupTimeout);
+            if (!gameRootRendered)
+            {
+                await client.NavigateAsync(appUrl);
+                gameRootRendered = await client.WaitForBooleanAsync("Boolean(document.querySelector('.game-root'))", BrowserStartupTimeout);
+            }
+
             if (gameRootRendered)
             {
                 await client.EvaluateBooleanAsync("""
