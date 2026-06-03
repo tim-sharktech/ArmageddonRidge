@@ -28,6 +28,9 @@ let cachedTerrainTopLength = -1;
 let cachedTerrainTopWorldHeight = 0;
 let cachedTerrainTop = 0;
 let rafId = 0;
+const shotRafIds = new Set();
+const shotTimeoutIds = new Set();
+const activeShotCompletes = new Set();
 let lastAmbientRedraw = 0;
 let shotInProgress = false;
 const spriteManifestVersion = "2026-05-04-genesis-v7";
@@ -134,9 +137,11 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
             }
 
             completed = true;
+            activeShotCompletes.delete(complete);
             shotInProgress = false;
             resolve();
         };
+        activeShotCompletes.add(complete);
 
         const fail = error => {
             console.error("Shot playback failed", error);
@@ -145,7 +150,7 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
 
         const finish = () => {
             if (!finalExplosions.length) {
-                setTimeout(complete, 120);
+                scheduleShotTimeout(complete, 120);
                 return;
             }
 
@@ -156,6 +161,11 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
 
         const tick = now => {
             try {
+                if (!ctx) {
+                    complete();
+                    return;
+                }
+
                 const elapsed = now - started;
                 const t = Math.min(1, elapsed / duration);
                 const holdProgress = extraHoldMs > 0 ? clamp((elapsed - duration) / extraHoldMs, 0, 1) : 1;
@@ -171,12 +181,17 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
                 drawPatriotCountermeasure(shotScene, playbackOptions, patriotTimelineProgress, holdProgress);
                 drawTriggeredExplosions(stagedExplosions, count, now, stagedStarts);
                 if (t < 1 || holdProgress < 1) {
-                    requestAnimationFrame(tick);
+                    scheduleShotFrame(tick);
                     return;
                 }
 
-                requestAnimationFrame(() => {
+                scheduleShotFrame(() => {
                     try {
+                        if (!ctx) {
+                            complete();
+                            return;
+                        }
+
                         drawScene(shotScene, 0, 0);
                         drawTrail(points, points.length, weaponId, activeExplosions, playbackOptions.visualKind);
                         drawPatriotCountermeasure(shotScene, playbackOptions, 1, 1);
@@ -191,7 +206,7 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
             }
         };
 
-        requestAnimationFrame(tick);
+        scheduleShotFrame(tick);
     });
 }
 
@@ -200,6 +215,7 @@ export function getStats() {
 }
 
 export function dispose() {
+    resolveActiveShotPlayback();
     if (rafId) {
         cancelAnimationFrame(rafId);
         rafId = 0;
@@ -214,6 +230,48 @@ export function dispose() {
     cachedTerrainTopWorldHeight = 0;
     cachedTerrainTop = 0;
     shotInProgress = false;
+}
+
+function scheduleShotFrame(callback) {
+    const id = requestAnimationFrame(now => {
+        shotRafIds.delete(id);
+        callback(now);
+    });
+    shotRafIds.add(id);
+    return id;
+}
+
+function scheduleShotTimeout(callback, delay) {
+    const id = setTimeout(() => {
+        shotTimeoutIds.delete(id);
+        callback();
+    }, delay);
+    shotTimeoutIds.add(id);
+    return id;
+}
+
+function clearShotCallbacks() {
+    for (const id of shotRafIds) {
+        cancelAnimationFrame(id);
+    }
+    shotRafIds.clear();
+
+    for (const id of shotTimeoutIds) {
+        clearTimeout(id);
+    }
+    shotTimeoutIds.clear();
+}
+
+function resolveActiveShotPlayback() {
+    if (!activeShotCompletes.size && !shotRafIds.size && !shotTimeoutIds.size) {
+        return;
+    }
+
+    const completes = Array.from(activeShotCompletes);
+    clearShotCallbacks();
+    for (const complete of completes) {
+        complete();
+    }
 }
 
 function trimTrailToIntercept(points, intercept) {
@@ -2037,20 +2095,25 @@ function animateExplosions(scene, explosions, screenShake) {
 
     return new Promise(resolve => {
         const tick = now => {
+            if (!ctx) {
+                resolve();
+                return;
+            }
+
             const t = Math.min(1, (now - started) / duration);
             const strength = Math.sin(t * Math.PI);
             const shake = screenShake ? strength * (intense ? 7 : 3) : 0;
             drawScene(scene, Math.sin(now * 0.09) * shake, Math.cos(now * 0.07) * shake * 0.45);
             drawExplosions(explosions, t);
             if (t < 1) {
-                requestAnimationFrame(tick);
+                scheduleShotFrame(tick);
                 return;
             }
 
             resolve();
         };
 
-        requestAnimationFrame(tick);
+        scheduleShotFrame(tick);
     });
 }
 
