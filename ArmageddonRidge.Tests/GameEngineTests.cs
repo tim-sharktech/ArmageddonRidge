@@ -646,6 +646,44 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void OwnedTurnStartHazardDamageIsCreditedToShooter()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        engine.StartBattle(state);
+        state.CpuTank.MaxHealth = 500;
+        state.CpuTank.Health = 500;
+        state.RadiationZones.Add(new RadiationZone(state.CpuTank.Center, 140, 2, 7, ShotVisualKind.Lava, state.PlayerTank.Id));
+        state.DamageDealtByPlayer = 20;
+
+        engine.FireCurrentTurn(state, settings, angle: 85, power: 1);
+
+        Assert.Equal(27, state.DamageDealtByPlayer);
+        Assert.Equal(493, state.CpuTank.Health);
+        Assert.Single(state.RadiationZones);
+        Assert.Equal(1, state.RadiationZones[0].TurnsRemaining);
+    }
+
+    [Fact]
+    public void NapalmCreatesOwnedLavaHazardZone()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        state.PlayerTank.AddWeapon(WeaponIds.NapalmFlask, 1);
+        state.SelectedWeaponId = WeaponIds.NapalmFlask;
+        engine.StartBattle(state);
+
+        var result = engine.FireCurrentTurn(state, settings, angle: 42, power: 65);
+
+        var zone = Assert.Single(Assert.Single(result.Explosions).RadiationZones);
+        Assert.Equal(ShotVisualKind.Lava, zone.VisualKind);
+        Assert.Equal(state.PlayerTank.Id, zone.OwnerTankId);
+        Assert.Contains(state.RadiationZones, active => active.OwnerTankId == state.PlayerTank.Id && active.VisualKind == ShotVisualKind.Lava);
+    }
+
+    [Fact]
     public void TurnStartHazardDamageCanEndRoundAfterCpuShot()
     {
         var engine = CreateEngine();

@@ -10,7 +10,14 @@ namespace ArmageddonRidge.Core.Models;
 /// <param name="TurnsRemaining">Remaining turn ticks before expiration.</param>
 /// <param name="DamagePerTurn">Raw damage applied per turn inside the radius.</param>
 /// <param name="VisualKind">Renderer hint for the lingering hazard effect.</param>
-public sealed record RadiationZone(Vector2 Center, float Radius, int TurnsRemaining, float DamagePerTurn, ShotVisualKind VisualKind = ShotVisualKind.Nuclear);
+/// <param name="OwnerTankId">Tank id credited when this hazard damages the opposing tank.</param>
+public sealed record RadiationZone(
+    Vector2 Center,
+    float Radius,
+    int TurnsRemaining,
+    float DamagePerTurn,
+    ShotVisualKind VisualKind = ShotVisualKind.Nuclear,
+    string OwnerTankId = "");
 
 /// <summary>
 /// Resolved result of a single explosion, including damage, terrain impact, and renderer hints.

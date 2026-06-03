@@ -679,8 +679,18 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
     private void ApplyStartOfTurnEffects(GameState state)
     {
         var active = state.CurrentTurn == TurnOwner.Player ? state.PlayerTank : state.CpuTank;
-        _explosionService.ApplyRadiation(active, state.RadiationZones);
+        _explosionService.ApplyRadiation(active, state.RadiationZones, (zone, damage) => CreditHazardDamage(state, active, zone, damage));
         _explosionService.TickRadiation(state.RadiationZones);
+    }
+
+    private static void CreditHazardDamage(GameState state, Tank damagedTank, RadiationZone zone, float damage)
+    {
+        if (damage <= 0 || string.IsNullOrWhiteSpace(zone.OwnerTankId)) return;
+
+        if (zone.OwnerTankId == state.PlayerTank.Id && damagedTank.Id == state.CpuTank.Id)
+            state.DamageDealtByPlayer += damage;
+        else if (zone.OwnerTankId == state.CpuTank.Id && damagedTank.Id == state.PlayerTank.Id)
+            state.DamageDealtByCpu += damage;
     }
 
     private TurnOwner? Winner(GameState state)

@@ -28,7 +28,7 @@ public sealed class ExplosionService
         if (weapon.RadiationTurns > 0 && weapon.RadiationDamagePerTurn > 0)
         {
             var zoneKind = resolvedVisualKind == ShotVisualKind.Fire ? ShotVisualKind.Lava : resolvedVisualKind;
-            var zone = new RadiationZone(center, weapon.BlastRadius * 0.7f, weapon.RadiationTurns, weapon.RadiationDamagePerTurn, zoneKind);
+            var zone = new RadiationZone(center, weapon.BlastRadius * 0.7f, weapon.RadiationTurns, weapon.RadiationDamagePerTurn, zoneKind, owner.Id);
             zones.Add(zone);
             newZones = [zone];
         }
@@ -48,7 +48,7 @@ public sealed class ExplosionService
     /// <summary>
     /// Applies active radiation or lava zones to a tank and returns total raw damage.
     /// </summary>
-    public float ApplyRadiation(Tank tank, List<RadiationZone> zones)
+    public float ApplyRadiation(Tank tank, List<RadiationZone> zones, Action<RadiationZone, float>? onDamageApplied = null)
     {
         var total = 0f;
         for (var i = 0; i < zones.Count; i++)
@@ -58,6 +58,7 @@ public sealed class ExplosionService
             {
                 total += zone.DamagePerTurn;
                 tank.Health -= (int)MathF.Ceiling(zone.DamagePerTurn);
+                onDamageApplied?.Invoke(zone, zone.DamagePerTurn);
             }
         }
 
