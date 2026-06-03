@@ -502,6 +502,42 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void BunkerBusterBurrowsIntoTerrainBeforeExploding()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        const float surfaceY = 620f;
+
+        for (var angle = 24; angle <= 68; angle += 2)
+        {
+            for (var power = 36; power <= 88; power += 2)
+            {
+                var state = engine.NewMatch(settings);
+                var heights = Enumerable.Repeat(surfaceY, GameConstants.WorldWidth).ToArray();
+                state.Terrain.CopyFrom(new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights));
+                state.PlayerTank.Position = new Vector2(160, surfaceY);
+                state.CpuTank.Position = new Vector2(1040, surfaceY);
+                state.PlayerTank.AddWeapon(WeaponIds.BunkerBuster, 1);
+                state.SelectedWeaponId = WeaponIds.BunkerBuster;
+                state.Wind = 0;
+                engine.StartBattle(state);
+
+                var result = engine.FireCurrentTurn(state, settings, angle, power);
+                if (result.Explosions.Count != 1 || result.Explosions[0].Center.Y <= surfaceY + 32f)
+                    continue;
+
+                Assert.Equal(WeaponIds.BunkerBuster, result.WeaponId);
+                Assert.Equal(ShotVisualKind.Ballistic, result.Explosions[0].VisualKind);
+                Assert.Equal(result.Trail[^1], result.Explosions[0].Center);
+                Assert.True(result.Trail.Count > 12);
+                return;
+            }
+        }
+
+        Assert.Fail("Expected one deterministic Bunker Buster firing solution to burrow below the terrain surface.");
+    }
+
+    [Fact]
     public void MassiveOrdnancePenetratorProducesStagedPrimaryAndSecondaryExplosions()
     {
         var engine = CreateEngine();

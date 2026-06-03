@@ -319,6 +319,9 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
             return SimulateGuidedDarkEagle(owner, opponent, weapon);
 
         var primary = _projectileSimulator.Simulate(state.Terrain, owner, opponent, weapon, angle, power, state.Wind);
+        if (weapon.BehaviorType == WeaponBehaviorType.BunkerBuster)
+            return SimulateBunkerBuster(primary, owner, weapon);
+
         if (weapon.BehaviorType == WeaponBehaviorType.MultiStagePenetrator)
             return SimulateMultiStagePenetrator(primary, owner, weapon);
 
@@ -391,6 +394,42 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
             trail,
             target,
             [new ExplosionResult(target, weapon.BlastRadius, weapon.TerrainRadius, 0, 0, false, false, [], ShotVisualKind.Missile)]);
+    }
+
+    private static WeaponSimulation SimulateBunkerBuster(ProjectileSimulation primary, Tank owner, WeaponDefinition weapon)
+    {
+        if (primary.StopReason != ProjectileStopReason.TerrainHit)
+        {
+            return new WeaponSimulation(
+                primary.Trail,
+                primary.ImpactPoint,
+                [new ExplosionResult(primary.ImpactPoint, weapon.BlastRadius, weapon.TerrainRadius, 0, 0, false, false, [], VisualKindFor(weapon))]);
+        }
+
+        var trail = new List<Vector2>(primary.Trail.Count + 12);
+        trail.AddRange(primary.Trail);
+        if (trail.Count == 0)
+            trail.Add(primary.ImpactPoint);
+
+        var impact = primary.ImpactPoint;
+        var previous = trail.Count > 1 ? trail[^2] : owner.Center;
+        var direction = impact - previous;
+        if (direction.LengthSquared() < 0.001f)
+            direction = new Vector2(owner.IsCpu ? -0.25f : 0.25f, 1f);
+
+        direction = Vector2.Normalize(new Vector2(direction.X * 0.35f, MathF.Max(MathF.Abs(direction.Y), 0.86f)));
+        const int burrowSteps = 12;
+        var burrowDistance = Math.Clamp(weapon.TerrainRadius * 0.72f, 42f, 86f);
+        for (var i = 1; i <= burrowSteps; i++)
+        {
+            var t = i / (float)burrowSteps;
+            trail.Add(ClampToWorld(impact + (direction * burrowDistance * t)));
+        }
+
+        return new WeaponSimulation(
+            trail,
+            trail[^1],
+            [new ExplosionResult(trail[^1], weapon.BlastRadius, weapon.TerrainRadius, 0, 0, false, false, [], VisualKindFor(weapon))]);
     }
 
     private static WeaponSimulation SimulateLaser(TerrainMask terrain, Tank owner, Tank opponent, WeaponDefinition weapon)
