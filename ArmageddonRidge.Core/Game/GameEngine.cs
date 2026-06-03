@@ -82,6 +82,7 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         state.CurrentTurn = TurnOwner.Player;
         state.Wind = NextWind(state);
         ApplyStartOfTurnEffects(state);
+        EndRoundIfWon(state);
     }
 
     /// <summary>
@@ -239,21 +240,16 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
             state.DamageDealtByCpu += damage;
         }
 
-        var winner = Winner(state);
-        if (winner is null)
+        if (Winner(state) is null)
         {
             state.CurrentTurn = TurnManager.OpponentOf(state.CurrentTurn);
             state.Wind = NextWind(state);
             ApplyStartOfTurnEffects(state);
-            winner = Winner(state);
         }
 
+        var winner = EndRoundIfWon(state);
         if (winner is not null)
-        {
-            Economy.AwardRound(state, winner.Value);
-            state.Phase = GamePhase.RoundOver;
             events.Add(winner == TurnOwner.Player ? "Victory. The ridge salutes your math." : "Defeat. The CPU is insufferable now.");
-        }
 
         var perf = new PerformanceSample(simulationWatch.Elapsed.TotalMilliseconds, terrainWatch.Elapsed.TotalMilliseconds, cpuPlanningMs, simulation.Trail.Count, touched);
         state.LastPerformance = perf;
@@ -684,6 +680,20 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         var active = state.CurrentTurn == TurnOwner.Player ? state.PlayerTank : state.CpuTank;
         _explosionService.ApplyRadiation(active, state.RadiationZones, (zone, damage) => CreditHazardDamage(state, active, zone, damage));
         _explosionService.TickRadiation(state.RadiationZones);
+    }
+
+    private TurnOwner? EndRoundIfWon(GameState state)
+    {
+        var winner = Winner(state);
+        if (winner is null) return null;
+
+        if (state.Phase != GamePhase.RoundOver)
+        {
+            Economy.AwardRound(state, winner.Value);
+            state.Phase = GamePhase.RoundOver;
+        }
+
+        return winner;
     }
 
     private static void CreditHazardDamage(GameState state, Tank damagedTank, RadiationZone zone, float damage)

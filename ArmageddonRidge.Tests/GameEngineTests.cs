@@ -719,6 +719,25 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void StartBattleEndsRoundWhenTurnStartHazardDestroysPlayer()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: true);
+        var state = engine.NewMatch(settings);
+        state.PlayerTank.Health = 10;
+        state.RadiationZones.Add(new RadiationZone(state.PlayerTank.Center, 140, 2, 600, ShotVisualKind.Nuclear, state.CpuTank.Id));
+        var cashBefore = state.PlayerTank.Cash;
+
+        engine.StartBattle(state);
+
+        Assert.Equal(GamePhase.RoundOver, state.Phase);
+        Assert.Equal(TurnOwner.Player, state.CurrentTurn);
+        Assert.True(state.PlayerTank.IsDestroyed);
+        Assert.Equal(cashBefore + GameConstants.LossConsolation, state.PlayerTank.Cash);
+        Assert.Equal(600, state.DamageDealtByCpu);
+    }
+
+    [Fact]
     public void TurnStartHazardDamageCanEndRoundAfterCpuShot()
     {
         var engine = CreateEngine();
