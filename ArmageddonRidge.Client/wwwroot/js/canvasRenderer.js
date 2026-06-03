@@ -1,5 +1,5 @@
 import { clamp, clamp01, hash2d, positiveModulo, quadraticScalar } from "./rendering/math.js";
-import { configureSprites, drawOrientedSprite, drawSprite, drawSpriteFacing, loadSprites, spriteFrame } from "./rendering/sprites.js";
+import { configureSprites, drawExtraSprite, drawOrientedSprite, drawSprite, drawSpriteFacing, hasSprite, loadSprites, spriteFrame } from "./rendering/sprites.js";
 import {
     isDarkEagleWeapon,
     isDroneWeapon,
@@ -28,16 +28,18 @@ let cachedTerrainTopLength = -1;
 let cachedTerrainTopWorldHeight = 0;
 let cachedTerrainTop = 0;
 let rafId = 0;
+let lastAmbientRedraw = 0;
 let shotInProgress = false;
 const spriteManifestVersion = "2026-05-04-genesis-v7";
+const ambientRedrawIntervalMs = 1000 / 30;
 const patriotInterceptDurationScale = 2.6;
 const patriotInterceptMinDuration = 2900;
 const patriotInterceptMaxDuration = 3400;
 const patriotInterceptBannerExtraHoldMs = 500;
 const patriotReticleScale = 1.65;
-const shieldRadiusX = 76;
-const shieldRadiusY = 58;
-const shieldCenterYOffset = 62;
+const shieldRadiusX = 90;
+const shieldRadiusY = 60;
+const shieldCenterYOffset = 52;
 const cloudBands = [
     { x: 90, y: 64, scale: 1.08, speed: 7 },
     { x: 360, y: 104, scale: 0.84, speed: 11 },
@@ -71,8 +73,10 @@ export function render(scene) {
     lastScene = renderScene;
     sizeCanvas();
     drawScene(renderScene, 0, 0);
-    updateStats();
+    const finished = performance.now();
+    updateStats(finished);
     renderMs = performance.now() - started;
+    lastAmbientRedraw = finished;
     return getStats();
 }
 
@@ -776,8 +780,8 @@ function drawTankShield(tank, shieldHit, now) {
     const pulse = 0.5 + Math.sin(now * 0.008) * 0.5;
     const centerX = Number(tank.x ?? 0);
     const centerY = Number(tank.y ?? 0) - shieldCenterYOffset;
-    const radiusX = shieldRadiusX - 5;
-    const radiusY = shieldRadiusY - 4;
+    const radiusX = shieldRadiusX;
+    const radiusY = shieldRadiusY - 3;
     const surfaceY = Number(tank.terrainY ?? tank.y);
     const top = centerY - radiusY - 22;
     const clipHeight = Math.max(0, surfaceY - top - 1);
@@ -843,8 +847,8 @@ function drawTankShield(tank, shieldHit, now) {
 function drawTankShieldHitGlimmer(tank, now) {
     const centerX = Number(tank.x ?? 0);
     const centerY = Number(tank.y ?? 0) - shieldCenterYOffset;
-    const radiusX = shieldRadiusX - 5;
-    const radiusY = shieldRadiusY - 4;
+    const radiusX = shieldRadiusX;
+    const radiusY = shieldRadiusY - 3;
     const pulse = 0.5 + Math.sin(now * 0.026) * 0.5;
 
     ctx.save();
@@ -1877,8 +1881,8 @@ function drawShahedDrone(x, y, angle, weaponId, scale = 1) {
     ctx.translate(x, y);
     ctx.rotate(angle);
     ctx.scale(scale, scale);
-    if (extraSprites.shahedDrone) {
-        ctx.drawImage(extraSprites.shahedDrone, -24, -12, 48, 24);
+    if (hasSprite("shahedDrone")) {
+        drawExtraSprite("shahedDrone", -24, -12, 48, 24);
         ctx.restore();
         return;
     }
@@ -1943,8 +1947,8 @@ function drawMopProjectile(last, prev) {
     ctx.save();
     ctx.translate(last.x, last.y);
     ctx.rotate(angle);
-    if (extraSprites.gbu57Mop) {
-        ctx.drawImage(extraSprites.gbu57Mop, -39, -15, 78, 30);
+    if (hasSprite("gbu57Mop")) {
+        drawExtraSprite("gbu57Mop", -39, -15, 78, 30);
         ctx.restore();
         return;
     }
@@ -2224,8 +2228,8 @@ function drawLavaSprite(x, y, size, phase, alpha = 1) {
     const height = Math.max(10, size * 0.45);
     ctx.save();
     ctx.globalAlpha = clamp01(alpha);
-    if (extraSprites.lavaPool) {
-        ctx.drawImage(extraSprites.lavaPool, x - width * 0.5, y - height * 0.5, width, height);
+    if (hasSprite("lavaPool")) {
+        drawExtraSprite("lavaPool", x - width * 0.5, y - height * 0.5, width, height);
     } else {
         ctx.fillStyle = "rgba(63, 17, 12, 0.92)";
         ctx.fillRect(x - width * 0.5, y - height * 0.38, width, height * 0.72);
@@ -2451,17 +2455,20 @@ function drawPenetratorShock(explosion, radius, progress) {
 
 function sizeCanvas() {
     const rect = canvas.getBoundingClientRect();
-    const nextWidth = Math.max(1, Math.floor(rect.width * devicePixelRatio));
-    const nextHeight = Math.max(1, Math.floor(rect.height * devicePixelRatio));
+    const ratio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const nextWidth = Math.max(1, Math.floor(rect.width * ratio));
+    const nextHeight = Math.max(1, Math.floor(rect.height * ratio));
     if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
         canvas.width = nextWidth;
         canvas.height = nextHeight;
         ctx.imageSmoothingEnabled = false;
+        return true;
     }
+
+    return false;
 }
 
-function updateStats() {
-    const now = performance.now();
+function updateStats(now = performance.now()) {
     frameMs = now - lastFrame;
     lastFrame = now;
     fps = (fps * 0.9) + ((1000 / Math.max(frameMs, 1)) * 0.1);
@@ -2473,14 +2480,17 @@ function startStatsLoop() {
     }
 
     const tick = () => {
-        const started = performance.now();
-        if (lastScene && !shotInProgress) {
-            sizeCanvas();
+        const now = performance.now();
+        const resized = sizeCanvas();
+        const redrawAmbient = lastScene && !shotInProgress && (resized || now - lastAmbientRedraw >= ambientRedrawIntervalMs);
+        if (redrawAmbient) {
+            const started = performance.now();
             drawScene(lastScene, 0, 0);
             renderMs = performance.now() - started;
+            lastAmbientRedraw = now;
         }
 
-        updateStats();
+        updateStats(now);
         rafId = requestAnimationFrame(tick);
     };
 

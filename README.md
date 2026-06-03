@@ -50,8 +50,54 @@ The app uses relative asset loading through `<base href="./" />`, so it can be h
 
 - Gameplay simulation is deterministic C# running in WebAssembly.
 - Rendering is isolated behind a narrow canvas module to keep JS interop batched.
-- The FPS overlay shows frame time, render time, simulation time, terrain edit time, and CPU planning time.
-- `/benchmarks` runs repeatable local projectile/AI scenarios for quick smoke checks.
+- CPU shot planning uses a coarse-to-refined deterministic search. The Blazor UI uses the yielding async planner so ambient canvas/WebGPU effects can keep animating while the CPU is thinking.
+- Terrain deformation is a WebAssembly SIMD showcase: crater and dirt-mound edits can update multiple terrain columns per vector operation through `TerrainMask`'s SIMD kernel.
+- The FPS overlay shows frame time, render time, simulation time, terrain edit time, CPU planning time, and SIMD availability.
+- `/benchmarks` runs repeatable local scenarios for quick smoke checks, including isolated CPU planning and scalar-vs-SIMD terrain deformation batches.
+
+## Performance Showcase
+
+Armageddon Ridge intentionally keeps the game rules in C# so the browser can demonstrate real WebAssembly work rather than only canvas drawing.
+
+### CPU Planning Without Freezing The Weather
+
+The CPU opponent evaluates many possible shots by simulating candidate weapons, angles, and power levels. Earlier brute-force planning could monopolize the browser's WebAssembly thread long enough for rain, snow, and other ambient effects to appear paused.
+
+The planner now:
+
+- runs a coarse first pass across candidate shots,
+- refines only the strongest candidates,
+- exits early on good-enough direct hits for non-Oracle difficulties,
+- preserves deterministic scoring and seeded noise,
+- exposes an async yielding path used by the Blazor battle flow.
+
+This keeps the visual loop responsive during "CPU thinking" while still using deterministic C# physics for the final decision.
+
+### WASM SIMD Terrain Deformation
+
+The clearest SIMD use case is terrain deformation. Large weapons such as nukes, MIRV impacts, the GBU-57 MOP, dirt drops, and excavators all modify the heightmap by applying circular craters or mounds.
+
+Scalar deformation checks one terrain column at a time:
+
+```text
+for each x column:
+  dx = x - centerX
+  if dx*dx is inside radius:
+    compute circle arc
+    update terrain height
+```
+
+The SIMD kernel processes several adjacent columns at once with `System.Numerics.Vector<float>`:
+
+```text
+xs = [x, x+1, x+2, ...]
+dx = xs - centerX
+remaining = radiusSquared - dx*dx
+nextTop = clamp(centerY +/- sqrt(remaining))
+terrain = select(changedColumns, nextTop, currentTop)
+```
+
+The `/benchmarks` page includes a terrain SIMD scenario that runs scalar and SIMD crater/mound batches over the same heightmap and reports total milliseconds, touched columns, SIMD lane count, and speedup ratio.
 
 ## Architecture
 

@@ -6,13 +6,17 @@ let context;
 let format;
 let particleBuffer;
 let radialBuffer;
+let activeParticleIndexBuffer;
+let activeRadialIndexBuffer;
 let uniformBuffer;
 let computePipeline;
 let renderPipeline;
 let postProcessPipeline;
+let weatherPipeline;
 let computeBindGroup;
 let renderBindGroup;
 let postProcessBindGroup;
+let weatherBindGroup;
 let sourceTexture;
 let sourceSampler;
 let sourceTextureWidth = 0;
@@ -44,6 +48,30 @@ let radialWriteIndex = 0;
 let spawnCount = 0;
 let scheduledImpactId = 0;
 let activeRadialCount = 0;
+let activeParticleCount = 0;
+let cachedParticleCount = 0;
+let cachedRadialCount = 0;
+let overlayScale = 1;
+let canvasPixelRatio = 1;
+let sourceCopyCadence = 1;
+let sourceCopyFrame = 0;
+let qualityFrameCounter = 0;
+let lastSubmittedGpuCheck = 0;
+let gpuQueueMs = 0;
+let perfMode = "adaptive";
+let spawnBatchNow = 0;
+let particleDirtyStart = -1;
+let particleDirtyEnd = -1;
+let particleDirtyWrapped = false;
+let diagnostics = {
+    disableSourceCopy: false,
+    disablePostProcess: false,
+    disableAmbient: false,
+    disableWeatherShader: false,
+    forceQualityTier: "",
+    forceOverlayScale: 0,
+    benchmarkMode: false
+};
 let patriotState;
 
 const maxParticles = 6000;
@@ -63,7 +91,9 @@ const expirations = new Float64Array(maxParticles);
 const radialData = new Float32Array(maxRadialEffects * radialFloats);
 const radialExpirations = new Float64Array(maxRadialEffects);
 const radialStartedAt = new Float64Array(maxRadialEffects);
-const uniformData = new Float32Array(12);
+const uniformData = new Float32Array(24);
+const activeParticleIndices = new Uint32Array(maxParticles);
+const activeRadialIndices = new Uint32Array(maxRadialEffects);
 
 const kinds = {
     spark: 0,
@@ -223,6 +253,7 @@ export async function initialize(baseElement, overlayElement, options = {}) {
     sourceCopyReady = false;
     postProcessMs = 0;
     sourceCopyMs = 0;
+    applyDiagnosticOptions(options);
 
     if (!options.enabled) {
         enabled = false;
@@ -308,7 +339,13 @@ export async function setEnabled(value) {
     return getStats();
 }
 
+export function configureDiagnostics(options = {}) {
+    applyDiagnosticOptions(options);
+    return getStats();
+}
+
 export function setScene(scene, terrainRevision, options = {}) {
+    applyDiagnosticOptions(options);
     currentScene = scene;
     currentWorld = scene?.world ?? currentWorld;
     currentWeather = scene?.weather ?? currentWeather;
@@ -323,9 +360,27 @@ export function setScene(scene, terrainRevision, options = {}) {
     return getStats();
 }
 
+function applyDiagnosticOptions(options = {}) {
+    if (!options) return;
+
+    diagnostics.disableSourceCopy = Boolean(options.disableSourceCopy ?? diagnostics.disableSourceCopy);
+    diagnostics.disablePostProcess = Boolean(options.disablePostProcess ?? diagnostics.disablePostProcess);
+    diagnostics.disableAmbient = Boolean(options.disableAmbient ?? diagnostics.disableAmbient);
+    diagnostics.disableWeatherShader = Boolean(options.disableWeatherShader ?? diagnostics.disableWeatherShader);
+    diagnostics.benchmarkMode = Boolean(options.benchmarkMode ?? diagnostics.benchmarkMode);
+    diagnostics.forceQualityTier = normalized(options.forceQualityTier ?? diagnostics.forceQualityTier);
+    diagnostics.forceOverlayScale = Number(options.forceOverlayScale ?? diagnostics.forceOverlayScale) || 0;
+    perfMode = diagnostics.benchmarkMode ? "benchmark" : diagnostics.forceQualityTier ? `forced-${diagnostics.forceQualityTier}` : "adaptive";
+
+    if (diagnostics.forceQualityTier && qualityProfiles[diagnostics.forceQualityTier]) {
+        setQualityTier(diagnostics.forceQualityTier);
+    }
+}
+
 export function spawnShotEffects(payload) {
     if (!enabled || !device) return getStats();
 
+    beginSpawnBatch();
     if (String(payload?.phase ?? "").toLowerCase() === "flight") {
         spawnFlightEffects(payload);
         startPatriotInterception(payload);
@@ -333,6 +388,7 @@ export function spawnShotEffects(payload) {
     } else {
         spawnImpactEffects(payload);
     }
+    endSpawnBatch();
 
     return getStats();
 }
@@ -344,6 +400,7 @@ export function spawnTerrainEffects(payload) {
 
     const wind = Number(payload.wind ?? currentWind);
     const explosions = payload.explosions ?? [];
+    beginSpawnBatch();
     for (const explosion of explosions) {
         const x = Number(explosion.x ?? 0);
         const radius = Math.max(16, Number(explosion.terrainRadius ?? explosion.radius ?? 40));
@@ -383,6 +440,7 @@ export function spawnTerrainEffects(payload) {
             }
         }
     }
+    endSpawnBatch();
 
     return getStats();
 }
@@ -394,9 +452,16 @@ export function getStats() {
         frameMs,
         postProcessMs,
         sourceCopyMs,
-        particleCount: estimateParticleCount(),
-        radialEffectCount: estimateRadialEffectCount(),
+        particleCount: cachedParticleCount,
+        radialEffectCount: cachedRadialCount,
         spawnCount,
+        activeParticleCount,
+        particleCapacity: maxParticles,
+        overlayScale,
+        canvasPixelRatio,
+        sourceCopyCadence,
+        gpuQueueMs,
+        perfMode,
         qualityTier,
         fallbackReason: fallbackReason ?? ""
     };
@@ -409,19 +474,25 @@ export function dispose() {
     clearCpuState();
     if (particleBuffer) particleBuffer.destroy();
     if (radialBuffer) radialBuffer.destroy();
+    if (activeParticleIndexBuffer) activeParticleIndexBuffer.destroy();
+    if (activeRadialIndexBuffer) activeRadialIndexBuffer.destroy();
     if (uniformBuffer) uniformBuffer.destroy();
     if (sourceTexture) sourceTexture.destroy();
     particleBuffer = undefined;
     radialBuffer = undefined;
+    activeParticleIndexBuffer = undefined;
+    activeRadialIndexBuffer = undefined;
     uniformBuffer = undefined;
     sourceTexture = undefined;
     sourceSampler = undefined;
     computePipeline = undefined;
     renderPipeline = undefined;
     postProcessPipeline = undefined;
+    weatherPipeline = undefined;
     computeBindGroup = undefined;
     renderBindGroup = undefined;
     postProcessBindGroup = undefined;
+    weatherBindGroup = undefined;
     enabled = false;
 }
 
@@ -440,6 +511,16 @@ function createResources() {
 
     radialBuffer = device.createBuffer({
         size: maxRadialEffects * radialStride,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+    });
+
+    activeParticleIndexBuffer = device.createBuffer({
+        size: activeParticleIndices.byteLength,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+    });
+
+    activeRadialIndexBuffer = device.createBuffer({
+        size: activeRadialIndices.byteLength,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
     });
 
@@ -465,7 +546,8 @@ function createResources() {
         layout: computePipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: particleBuffer } },
-            { binding: 1, resource: { buffer: uniformBuffer } }
+            { binding: 1, resource: { buffer: uniformBuffer } },
+            { binding: 2, resource: { buffer: activeParticleIndexBuffer } }
         ]
     });
 
@@ -500,7 +582,8 @@ function createResources() {
         layout: renderPipeline.getBindGroupLayout(0),
         entries: [
             { binding: 0, resource: { buffer: particleBuffer } },
-            { binding: 1, resource: { buffer: uniformBuffer } }
+            { binding: 1, resource: { buffer: uniformBuffer } },
+            { binding: 2, resource: { buffer: activeParticleIndexBuffer } }
         ]
     });
 
@@ -532,6 +615,40 @@ function createResources() {
         primitive: { topology: "triangle-list" }
     });
     createPostProcessBindGroup();
+
+    const weatherModule = device.createShaderModule({ code: weatherShader });
+    weatherPipeline = device.createRenderPipeline({
+        layout: "auto",
+        vertex: { module: weatherModule, entryPoint: "vertexMain" },
+        fragment: {
+            module: weatherModule,
+            entryPoint: "fragmentMain",
+            targets: [
+                {
+                    format,
+                    blend: {
+                        color: {
+                            srcFactor: "one",
+                            dstFactor: "one-minus-src-alpha",
+                            operation: "add"
+                        },
+                        alpha: {
+                            srcFactor: "one",
+                            dstFactor: "one-minus-src-alpha",
+                            operation: "add"
+                        }
+                    }
+                }
+            ]
+        },
+        primitive: { topology: "triangle-list" }
+    });
+    weatherBindGroup = device.createBindGroup({
+        layout: weatherPipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: uniformBuffer } }
+        ]
+    });
 
     clearCpuState();
 }
@@ -565,16 +682,20 @@ function frame(now) {
     resizeCanvas();
     emitAmbient(dt, now);
     emitPatriotEffects(dt, now);
-    const radialCount = updateRadialAges(now);
+    const particleCount = refreshActiveParticleIndices(now);
+    const radialCount = refreshActiveRadialIndices(now);
     copySourceCanvasIfNeeded(radialCount);
     updateUniforms(dt, now);
+    flushParticleWrites();
 
     const encoder = device.createCommandEncoder();
-    const computePass = encoder.beginComputePass();
-    computePass.setPipeline(computePipeline);
-    computePass.setBindGroup(0, computeBindGroup);
-    computePass.dispatchWorkgroups(Math.ceil(maxParticles / workgroupSize));
-    computePass.end();
+    if (particleCount > 0) {
+        const computePass = encoder.beginComputePass();
+        computePass.setPipeline(computePipeline);
+        computePass.setBindGroup(0, computeBindGroup);
+        computePass.dispatchWorkgroups(Math.ceil(particleCount / workgroupSize));
+        computePass.end();
+    }
 
     const renderPass = encoder.beginRenderPass({
         colorAttachments: [
@@ -587,21 +708,33 @@ function frame(now) {
         ]
     });
     const postStarted = performance.now();
-    if (postProcessPipeline && postProcessBindGroup && radialCount > 0) {
+    if (!diagnostics.disableWeatherShader && weatherPipeline && weatherBindGroup && shouldRenderProceduralWeather()) {
+        renderPass.setPipeline(weatherPipeline);
+        renderPass.setBindGroup(0, weatherBindGroup);
+        renderPass.draw(6, 1);
+    }
+    if (!diagnostics.disablePostProcess && postProcessPipeline && postProcessBindGroup && radialCount > 0) {
         renderPass.setPipeline(postProcessPipeline);
         renderPass.setBindGroup(0, postProcessBindGroup);
-        renderPass.draw(6, maxRadialEffects);
+        renderPass.draw(6, radialCount);
     }
     postProcessMs = performance.now() - postStarted;
-    renderPass.setPipeline(renderPipeline);
-    renderPass.setBindGroup(0, renderBindGroup);
-    renderPass.draw(6, maxParticles);
+    if (particleCount > 0) {
+        renderPass.setPipeline(renderPipeline);
+        renderPass.setBindGroup(0, renderBindGroup);
+        renderPass.draw(6, particleCount);
+    }
     renderPass.end();
 
     device.queue.submit([encoder.finish()]);
     frameMs = performance.now() - started;
     updateQualityTier();
-    rafId = requestAnimationFrame(frame);
+    sampleGpuQueue(now);
+    if (shouldContinueLoop()) {
+        rafId = requestAnimationFrame(frame);
+    } else {
+        clearOverlay();
+    }
 }
 
 function clearOverlay() {
@@ -623,30 +756,81 @@ function clearOverlay() {
     device.queue.submit([encoder.finish()]);
 }
 
+function shouldContinueLoop() {
+    if (!enabled || diagnostics.benchmarkMode) return enabled;
+    if (particleDirtyStart >= 0 || cachedParticleCount > 0 || cachedRadialCount > 0 || patriotState) return true;
+    if (shouldRenderProceduralWeather() || hasAmbientEmitters()) return true;
+    return false;
+}
+
+function hasAmbientEmitters() {
+    if (!currentScene || reducedMotion || diagnostics.disableAmbient) return false;
+    const weather = normalized(currentWeather?.type);
+    if (weather === "rain" || weather === "storm" || weather === "snow") return true;
+    if (Math.abs(currentWind) > 4) return true;
+    return (currentScene.radiation ?? []).length > 0;
+}
+
+function shouldRenderProceduralWeather() {
+    if (!currentScene || reducedMotion || diagnostics.disableAmbient || diagnostics.disableWeatherShader) return false;
+    const weather = normalized(currentWeather?.type);
+    return weather === "rain" || weather === "storm" || weather === "snow";
+}
+
+function sampleGpuQueue(now) {
+    if (!device?.queue?.onSubmittedWorkDone || now - lastSubmittedGpuCheck < 1000) return;
+
+    lastSubmittedGpuCheck = now;
+    const started = performance.now();
+    device.queue.onSubmittedWorkDone()
+        .then(() => {
+            gpuQueueMs = performance.now() - started;
+        })
+        .catch(() => {
+            gpuQueueMs = 0;
+        });
+}
+
 function resizeCanvas() {
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const ratio = Math.max(1, window.devicePixelRatio || 1);
+    overlayScale = resolveOverlayScale();
+    canvasPixelRatio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const ratio = Math.max(0.5, canvasPixelRatio * overlayScale);
     const width = Math.max(1, Math.floor(rect.width * ratio));
     const height = Math.max(1, Math.floor(rect.height * ratio));
     if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
         createOrResizeSourceTexture();
+    } else {
+        createOrResizeSourceTexture();
     }
+}
+
+function resolveOverlayScale() {
+    if (diagnostics.forceOverlayScale > 0) {
+        return clamp(diagnostics.forceOverlayScale, 0.35, 1);
+    }
+
+    if (qualityTier === "low") return 0.5;
+    if (qualityTier === "balanced") return 0.75;
+    return 1;
 }
 
 function createOrResizeSourceTexture() {
     if (!device || !canvas || canvas.width <= 0 || canvas.height <= 0) return;
 
-    if (sourceTexture && sourceTextureWidth === canvas.width && sourceTextureHeight === canvas.height) {
+    const sourceWidth = Math.max(canvas.width, Number(sourceCanvas?.width ?? canvas.width));
+    const sourceHeight = Math.max(canvas.height, Number(sourceCanvas?.height ?? canvas.height));
+    if (sourceTexture && sourceTextureWidth === sourceWidth && sourceTextureHeight === sourceHeight) {
         return;
     }
 
     if (sourceTexture) sourceTexture.destroy();
-    sourceTextureWidth = canvas.width;
-    sourceTextureHeight = canvas.height;
+    sourceTextureWidth = sourceWidth;
+    sourceTextureHeight = sourceHeight;
     sourceTexture = device.createTexture({
         size: { width: sourceTextureWidth, height: sourceTextureHeight, depthOrArrayLayers: 1 },
         format: "rgba8unorm",
@@ -656,7 +840,7 @@ function createOrResizeSourceTexture() {
 }
 
 function createPostProcessBindGroup() {
-    if (!device || !postProcessPipeline || !radialBuffer || !uniformBuffer || !sourceTexture || !sourceSampler) return;
+    if (!device || !postProcessPipeline || !radialBuffer || !activeRadialIndexBuffer || !uniformBuffer || !sourceTexture || !sourceSampler) return;
 
     postProcessBindGroup = device.createBindGroup({
         layout: postProcessPipeline.getBindGroupLayout(0),
@@ -664,35 +848,63 @@ function createPostProcessBindGroup() {
             { binding: 0, resource: { buffer: radialBuffer } },
             { binding: 1, resource: { buffer: uniformBuffer } },
             { binding: 2, resource: sourceTexture.createView() },
-            { binding: 3, resource: sourceSampler }
+            { binding: 3, resource: sourceSampler },
+            { binding: 4, resource: { buffer: activeRadialIndexBuffer } }
         ]
     });
 }
 
 function updateUniforms(dt, now) {
+    const worldWidth = Number(currentWorld?.width ?? 1200);
+    const worldHeight = Number(currentWorld?.height ?? 700);
+    const scale = Math.min(canvas.width / worldWidth, canvas.height / worldHeight);
+    const left = (canvas.width - worldWidth * scale) * 0.5;
+    const top = (canvas.height - worldHeight * scale) * 0.5;
+    const weather = normalized(currentWeather?.type);
+    const weatherType = weather === "rain" || weather === "storm" ? 1 : weather === "snow" ? 2 : 0;
+    const weatherIntensity = clamp(Number(currentWeather?.intensity ?? 0), 0, 1);
     uniformData[0] = dt;
     uniformData[1] = currentWind;
     uniformData[2] = gravity;
     uniformData[3] = now * 0.001;
     uniformData[4] = canvas.width;
     uniformData[5] = canvas.height;
-    uniformData[6] = Number(currentWorld?.width ?? 1200);
-    uniformData[7] = Number(currentWorld?.height ?? 700);
+    uniformData[6] = worldWidth;
+    uniformData[7] = worldHeight;
     uniformData[8] = sourceCopyReady ? 1 : 0;
     uniformData[9] = qualityLevel;
     uniformData[10] = activeRadialCount;
-    uniformData[11] = 0;
+    uniformData[11] = activeParticleCount;
+    uniformData[12] = scale;
+    uniformData[13] = left;
+    uniformData[14] = top;
+    uniformData[15] = canvas.width > 0 ? 1 / canvas.width : 1;
+    uniformData[16] = canvas.height > 0 ? 1 / canvas.height : 1;
+    uniformData[17] = weatherType;
+    uniformData[18] = weatherIntensity;
+    uniformData[19] = overlayScale;
+    uniformData[20] = canvasPixelRatio;
+    uniformData[21] = 0;
+    uniformData[22] = sourceTextureWidth > 0 ? canvas.width / sourceTextureWidth : 1;
+    uniformData[23] = sourceTextureHeight > 0 ? canvas.height / sourceTextureHeight : 1;
     device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 }
 
 function copySourceCanvasIfNeeded(radialCount) {
     sourceCopyReady = false;
     sourceCopyMs = 0;
-    if (!radialCount || !sourceCanvas || !sourceTexture || !sourceCopySupported || qualityTier === "low") {
+    sourceCopyCadence = 0;
+    if (diagnostics.disableSourceCopy || !radialCount || !sourceCanvas || !sourceTexture || !sourceCopySupported || qualityTier === "low") {
         return;
     }
 
     if (!hasSourceSamplingRadials()) return;
+    sourceCopyFrame++;
+    sourceCopyCadence = qualityTier === "balanced" ? 2 : 1;
+    if (sourceCopyCadence > 1 && sourceCopyFrame % sourceCopyCadence !== 0) {
+        sourceCopyReady = true;
+        return;
+    }
 
     const width = Math.min(sourceTextureWidth, Number(sourceCanvas.width ?? sourceTextureWidth));
     const height = Math.min(sourceTextureHeight, Number(sourceCanvas.height ?? sourceTextureHeight));
@@ -753,7 +965,9 @@ function scheduleImpactEffects(payload) {
     scheduledImpactId = setTimeout(() => {
         scheduledImpactId = 0;
         if (!enabled || !device) return;
+        beginSpawnBatch();
         spawnImpactEffects(payload);
+        endSpawnBatch();
     }, delay);
 }
 
@@ -1379,25 +1593,24 @@ function spawnShieldRipple(payload) {
 }
 
 function emitAmbient(dt, now) {
-    if (!currentScene || reducedMotion) return;
+    if (!currentScene || reducedMotion || diagnostics.disableAmbient) return;
 
+    beginSpawnBatch(now);
     ambientAccumulator += dt;
-    if (ambientAccumulator < 0.016) return;
+    if (ambientAccumulator < 0.016) {
+        endSpawnBatch();
+        return;
+    }
     const elapsed = Math.min(0.08, ambientAccumulator);
     ambientAccumulator = 0;
 
     const weather = normalized(currentWeather?.type);
     const intensity = clamp(Number(currentWeather?.intensity ?? 0.35), 0, 1);
     if (weather === "rain" || weather === "storm") {
-        const rate = scaledDensity((weather === "storm" ? 260 : 150) * (0.45 + intensity), true);
-        emitCount(rate * elapsed, spawnRain);
         if (weather === "storm" && Math.random() < elapsed * 0.35 * intensity) {
             spawnParticle(randomBetween(160, currentWorld.width - 160), randomBetween(60, 220), 0, 0, 0.72, 0.86, 1, 0.22, randomBetween(280, 520), randomBetween(0.16, 0.32), kinds.flash);
             spawnRadialEffect(randomBetween(160, currentWorld.width - 160), randomBetween(80, 240), randomBetween(260, 520), randomBetween(0.18, 0.34), radialKinds.flash, 0.45, [0.72, 0.86, 1, 0.16], { softness: 0.72, wind: currentWind });
         }
-    } else if (weather === "snow") {
-        const rate = scaledDensity(85 * (0.5 + intensity), true);
-        emitCount(rate * elapsed, spawnSnow);
     }
 
     const windStrength = Math.abs(currentWind);
@@ -1410,19 +1623,7 @@ function emitAmbient(dt, now) {
         const rate = scaledDensity(zone.lava ? 28 : 18, true);
         emitCount(rate * elapsed, () => spawnRadiation(zone));
     }
-}
-
-function spawnRain() {
-    const x = randomBetween(-80, currentWorld.width + 80);
-    const y = randomBetween(-60, -6);
-    const wind = currentWind * randomBetween(1.5, 2.8);
-    spawnParticle(x, y, wind, randomBetween(420, 620), 0.72, 0.86, 1, 0.34, randomBetween(10, 18), randomBetween(0.9, 1.45), kinds.rain);
-}
-
-function spawnSnow() {
-    const x = randomBetween(-40, currentWorld.width + 40);
-    const y = randomBetween(-40, -4);
-    spawnParticle(x, y, currentWind * 0.55 + randomBetween(-16, 16), randomBetween(28, 74), 0.94, 0.98, 1, 0.42, randomBetween(2.5, 5.5), randomBetween(4.8, 8), kinds.snow);
+    endSpawnBatch();
 }
 
 function spawnWindDust() {
@@ -1464,9 +1665,61 @@ function spawnParticle(x, y, vx, vy, r, g, b, a, size, lifetime, kind) {
     particleData[offset + 9] = Math.max(0.05, lifetime);
     particleData[offset + 10] = Math.max(1, size);
     particleData[offset + 11] = kind;
-    expirations[index] = performance.now() + (lifetime * 1000);
-    device.queue.writeBuffer(particleBuffer, index * particleStride, particleData, offset, particleFloats);
+    expirations[index] = (spawnBatchNow || performance.now()) + (lifetime * 1000);
+    markParticleDirty(index);
     spawnCount++;
+}
+
+function beginSpawnBatch(now = performance.now()) {
+    spawnBatchNow = now;
+}
+
+function endSpawnBatch() {
+    spawnBatchNow = 0;
+}
+
+function markParticleDirty(index) {
+    if (particleDirtyStart < 0) {
+        particleDirtyStart = index;
+        particleDirtyEnd = index;
+        particleDirtyWrapped = false;
+        return;
+    }
+
+    if (particleDirtyWrapped) {
+        particleDirtyEnd = Math.max(particleDirtyEnd, index);
+        return;
+    }
+
+    if (index >= particleDirtyStart) {
+        particleDirtyEnd = Math.max(particleDirtyEnd, index);
+    } else {
+        particleDirtyWrapped = true;
+        particleDirtyEnd = index;
+    }
+}
+
+function flushParticleWrites() {
+    if (!particleBuffer || particleDirtyStart < 0) return;
+
+    if (particleDirtyWrapped) {
+        const tailCount = maxParticles - particleDirtyStart;
+        if (tailCount > 0) {
+            device.queue.writeBuffer(particleBuffer, particleDirtyStart * particleStride, particleData, particleDirtyStart * particleFloats, tailCount * particleFloats);
+        }
+
+        const headCount = particleDirtyEnd + 1;
+        if (headCount > 0) {
+            device.queue.writeBuffer(particleBuffer, 0, particleData, 0, headCount * particleFloats);
+        }
+    } else {
+        const count = particleDirtyEnd - particleDirtyStart + 1;
+        device.queue.writeBuffer(particleBuffer, particleDirtyStart * particleStride, particleData, particleDirtyStart * particleFloats, count * particleFloats);
+    }
+
+    particleDirtyStart = -1;
+    particleDirtyEnd = -1;
+    particleDirtyWrapped = false;
 }
 
 function spawnRadialEffect(x, y, radius, duration, type, intensity, color, options = {}) {
@@ -1500,7 +1753,7 @@ function writeRadialSlot(index, effect) {
     radialData[offset] = Number(effect.x ?? 0);
     radialData[offset + 1] = Number(effect.y ?? 0);
     radialData[offset + 2] = Math.max(1, Number(effect.radius ?? 1));
-    radialData[offset + 3] = 0;
+    radialData[offset + 3] = now * 0.001;
     radialData[offset + 4] = clamp(Number(color[0] ?? 1), 0, 1);
     radialData[offset + 5] = clamp(Number(color[1] ?? 1), 0, 1);
     radialData[offset + 6] = clamp(Number(color[2] ?? 1), 0, 1);
@@ -1525,8 +1778,27 @@ function clearRadialSlot(index) {
     radialStartedAt[index] = 0;
 }
 
-function updateRadialAges(now) {
-    if (!radialBuffer) return 0;
+function refreshActiveParticleIndices(now) {
+    if (!activeParticleIndexBuffer) return 0;
+
+    let count = 0;
+    for (let i = 0; i < maxParticles; i++) {
+        if (expirations[i] > now) {
+            activeParticleIndices[count++] = i;
+        }
+    }
+
+    activeParticleCount = count;
+    cachedParticleCount = count;
+    if (count > 0) {
+        device.queue.writeBuffer(activeParticleIndexBuffer, 0, activeParticleIndices, 0, count);
+    }
+
+    return count;
+}
+
+function refreshActiveRadialIndices(now) {
+    if (!activeRadialIndexBuffer) return 0;
 
     let count = 0;
     for (let i = 0; i < maxRadialEffects; i++) {
@@ -1538,12 +1810,14 @@ function updateRadialAges(now) {
             continue;
         }
 
-        radialData[offset + 3] = Math.max(0, (now - radialStartedAt[i]) / 1000);
-        count++;
+        activeRadialIndices[count++] = i;
     }
 
     activeRadialCount = count;
-    device.queue.writeBuffer(radialBuffer, 0, radialData);
+    cachedRadialCount = count;
+    if (count > 0) {
+        device.queue.writeBuffer(activeRadialIndexBuffer, 0, activeRadialIndices, 0, count);
+    }
     return count;
 }
 
@@ -1602,6 +1876,12 @@ function clearCpuState() {
     radialWriteIndex = persistentRadialSlots;
     spawnCount = 0;
     activeRadialCount = 0;
+    activeParticleCount = 0;
+    cachedParticleCount = 0;
+    cachedRadialCount = 0;
+    particleDirtyStart = -1;
+    particleDirtyEnd = -1;
+    particleDirtyWrapped = false;
     if (device && particleBuffer) {
         device.queue.writeBuffer(particleBuffer, 0, particleData);
     }
@@ -1610,34 +1890,22 @@ function clearCpuState() {
     }
 }
 
-function estimateParticleCount() {
-    const now = performance.now();
-    let count = 0;
-    for (let i = 0; i < expirations.length; i++) {
-        if (expirations[i] > now) count++;
-    }
-
-    return count;
-}
-
-function estimateRadialEffectCount() {
-    const now = performance.now();
-    let count = 0;
-    for (let i = 0; i < radialExpirations.length; i++) {
-        if (radialExpirations[i] > now) count++;
-    }
-
-    return count;
-}
-
 function updateQualityTier() {
-    const tooExpensive = frameMs > 24 || sourceCopyMs > 4.5 || postProcessMs > 4 || estimateParticleCount() > maxParticles * 0.86;
-    const comfortable = frameMs < 15.5 && sourceCopyMs < 2.2 && postProcessMs < 2.2 && estimateParticleCount() < maxParticles * 0.62;
+    qualityFrameCounter++;
+    if (diagnostics.forceQualityTier && qualityProfiles[diagnostics.forceQualityTier]) {
+        setQualityTier(diagnostics.forceQualityTier);
+        return;
+    }
+
+    if (qualityFrameCounter % 4 !== 0) return;
+
+    const tooExpensive = frameMs > 22 || sourceCopyMs > 4 || postProcessMs > 3.5 || cachedParticleCount > maxParticles * 0.78;
+    const comfortable = frameMs < 14.5 && sourceCopyMs < 1.8 && postProcessMs < 1.8 && cachedParticleCount < maxParticles * 0.5;
 
     if (tooExpensive) {
         qualityDebt++;
         qualityCredit = 0;
-        if (qualityDebt > 7) {
+        if (qualityDebt > 3) {
             if (qualityTier === "high") setQualityTier("balanced");
             else if (qualityTier === "balanced") setQualityTier("low");
             qualityDebt = 0;
@@ -1645,7 +1913,7 @@ function updateQualityTier() {
     } else if (comfortable) {
         qualityCredit++;
         qualityDebt = Math.max(0, qualityDebt - 1);
-        if (qualityCredit > 180) {
+        if (qualityCredit > 240) {
             if (qualityTier === "low") setQualityTier("balanced");
             else if (qualityTier === "balanced") setQualityTier("high");
             qualityCredit = 0;
@@ -1726,11 +1994,26 @@ struct Uniforms {
     gravity: f32,
     time: f32,
     canvasSize: vec2f,
-    worldSize: vec2f
+    worldSize: vec2f,
+    sourceReady: f32,
+    qualityLevel: f32,
+    radialCount: f32,
+    activeParticleCount: f32,
+    worldScale: f32,
+    worldLeft: f32,
+    worldTop: f32,
+    invCanvasWidth: f32,
+    invCanvasHeight: f32,
+    weatherType: f32,
+    weatherIntensity: f32,
+    overlayScale: f32,
+    canvasPixelRatio: f32,
+    sourceScale: vec2f
 };
 
 @group(0) @binding(0) var<storage, read_write> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
+@group(0) @binding(2) var<storage, read> activeIndices: array<u32>;
 
 fn inKind(kind: f32, target: f32) -> bool {
     return abs(kind - target) < 0.5;
@@ -1738,10 +2021,10 @@ fn inKind(kind: f32, target: f32) -> bool {
 
 @compute @workgroup_size(${workgroupSize})
 fn updateParticles(@builtin(global_invocation_id) id: vec3u) {
-    let index = id.x;
-    if (index >= arrayLength(&particles)) {
+    if (id.x >= u32(uniforms.activeParticleCount)) {
         return;
     }
+    let index = activeIndices[id.x];
 
     var particle = particles[index];
     if (particle.meta.y <= 0.0 || particle.meta.x >= particle.meta.y) {
@@ -1794,7 +2077,21 @@ struct Uniforms {
     gravity: f32,
     time: f32,
     canvasSize: vec2f,
-    worldSize: vec2f
+    worldSize: vec2f,
+    sourceReady: f32,
+    qualityLevel: f32,
+    radialCount: f32,
+    activeParticleCount: f32,
+    worldScale: f32,
+    worldLeft: f32,
+    worldTop: f32,
+    invCanvasWidth: f32,
+    invCanvasHeight: f32,
+    weatherType: f32,
+    weatherIntensity: f32,
+    overlayScale: f32,
+    canvasPixelRatio: f32,
+    sourceScale: vec2f
 };
 
 struct VertexOut {
@@ -1806,6 +2103,7 @@ struct VertexOut {
 
 @group(0) @binding(0) var<storage, read> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
+@group(0) @binding(2) var<storage, read> activeIndices: array<u32>;
 
 const corners = array<vec2f, 6>(
     vec2f(-1.0, -1.0),
@@ -1822,7 +2120,7 @@ fn inKind(kind: f32, target: f32) -> bool {
 
 @vertex
 fn vertexMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
-    let particle = particles[instanceIndex];
+    let particle = particles[activeIndices[instanceIndex]];
     let corner = corners[vertexIndex];
     let progress = clamp(particle.meta.x / max(particle.meta.y, 0.001), 0.0, 1.0);
     let kind = particle.meta.w;
@@ -1842,11 +2140,8 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) 
     }
 
     let worldPosition = particle.position + corner * size;
-    let scale = min(uniforms.canvasSize.x / uniforms.worldSize.x, uniforms.canvasSize.y / uniforms.worldSize.y);
-    let left = (uniforms.canvasSize.x - uniforms.worldSize.x * scale) * 0.5;
-    let top = (uniforms.canvasSize.y - uniforms.worldSize.y * scale) * 0.5;
-    let pixel = vec2f(left + worldPosition.x * scale, top + worldPosition.y * scale);
-    let clip = vec2f((pixel.x / uniforms.canvasSize.x) * 2.0 - 1.0, 1.0 - (pixel.y / uniforms.canvasSize.y) * 2.0);
+    let pixel = vec2f(uniforms.worldLeft + worldPosition.x * uniforms.worldScale, uniforms.worldTop + worldPosition.y * uniforms.worldScale);
+    let clip = vec2f((pixel.x * uniforms.invCanvasWidth) * 2.0 - 1.0, 1.0 - (pixel.y * uniforms.invCanvasHeight) * 2.0);
 
     var output: VertexOut;
     output.position = vec4f(clip, 0.0, 1.0);
@@ -1900,7 +2195,7 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
 
 const postProcessShader = `
 struct RadialEffect {
-    centerRadiusAge: vec4f,
+    centerRadiusStart: vec4f,
     color: vec4f,
     meta: vec4f,
     extra: vec4f
@@ -1916,7 +2211,17 @@ struct Uniforms {
     sourceReady: f32,
     qualityLevel: f32,
     radialCount: f32,
-    pad0: f32
+    activeParticleCount: f32,
+    worldScale: f32,
+    worldLeft: f32,
+    worldTop: f32,
+    invCanvasWidth: f32,
+    invCanvasHeight: f32,
+    weatherType: f32,
+    weatherIntensity: f32,
+    overlayScale: f32,
+    canvasPixelRatio: f32,
+    sourceScale: vec2f
 };
 
 struct VertexOut {
@@ -1933,6 +2238,7 @@ struct VertexOut {
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var sourceTexture: texture_2d<f32>;
 @group(0) @binding(3) var sourceSampler: sampler;
+@group(0) @binding(4) var<storage, read> activeRadialIndices: array<u32>;
 
 const corners = array<vec2f, 6>(
     vec2f(-1.0, -1.0),
@@ -1948,10 +2254,7 @@ fn inKind(kind: f32, target: f32) -> bool {
 }
 
 fn worldToPixel(worldPosition: vec2f) -> vec2f {
-    let scale = min(uniforms.canvasSize.x / uniforms.worldSize.x, uniforms.canvasSize.y / uniforms.worldSize.y);
-    let left = (uniforms.canvasSize.x - uniforms.worldSize.x * scale) * 0.5;
-    let top = (uniforms.canvasSize.y - uniforms.worldSize.y * scale) * 0.5;
-    return vec2f(left + worldPosition.x * scale, top + worldPosition.y * scale);
+    return vec2f(uniforms.worldLeft + worldPosition.x * uniforms.worldScale, uniforms.worldTop + worldPosition.y * uniforms.worldScale);
 }
 
 fn hash21(p: vec2f) -> f32 {
@@ -1971,13 +2274,13 @@ fn noise(p: vec2f) -> f32 {
 
 @vertex
 fn vertexMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOut {
-    let effect = effects[instanceIndex];
+    let effect = effects[activeRadialIndices[instanceIndex]];
     let corner = corners[vertexIndex];
-    let age = effect.centerRadiusAge.w;
+    let age = max(0.0, uniforms.time - effect.centerRadiusStart.w);
     let duration = effect.meta.x;
     let progress = clamp(age / max(duration, 0.001), 0.0, 1.0);
     let kind = effect.meta.y;
-    var radius = effect.centerRadiusAge.z;
+    var radius = effect.centerRadiusStart.z;
 
     if (duration <= 0.0 || age >= duration) {
         radius = 0.0;
@@ -1988,16 +2291,16 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) 
     }
 
     let aspect = max(effect.extra.z, 0.2);
-    let worldPosition = effect.centerRadiusAge.xy + vec2f(corner.x * radius * aspect, corner.y * radius);
+    let worldPosition = effect.centerRadiusStart.xy + vec2f(corner.x * radius * aspect, corner.y * radius);
     let pixel = worldToPixel(worldPosition);
-    let clip = vec2f((pixel.x / uniforms.canvasSize.x) * 2.0 - 1.0, 1.0 - (pixel.y / uniforms.canvasSize.y) * 2.0);
+    let clip = vec2f((pixel.x * uniforms.invCanvasWidth) * 2.0 - 1.0, 1.0 - (pixel.y * uniforms.invCanvasHeight) * 2.0);
 
     var output: VertexOut;
     output.position = vec4f(clip, 0.0, 1.0);
     output.local = corner;
-    output.uv = pixel / uniforms.canvasSize;
+    output.uv = pixel * vec2f(uniforms.invCanvasWidth, uniforms.invCanvasHeight);
     output.color = effect.color;
-    output.effect = effect.centerRadiusAge;
+    output.effect = vec4f(effect.centerRadiusStart.xyz, age);
     output.meta = effect.meta;
     output.extra = effect.extra;
     return output;
@@ -2012,7 +2315,6 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
     let age = input.effect.w;
     let progress = clamp(age / max(duration, 0.001), 0.0, 1.0);
     let d = length(input.local);
-    let n = noise(input.local * 3.2 + vec2f(seed * 0.17 + uniforms.time * 0.34 + input.extra.x * 0.01, seed * 0.11 - uniforms.time * 0.21));
     var alpha = 0.0;
     var color = input.color.rgb;
     var uvOffset = vec2f(0.0, 0.0);
@@ -2023,6 +2325,7 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
     }
 
     if (inKind(kind, 0.0)) {
+        let n = noise(input.local * 3.2 + vec2f(seed * 0.17 + uniforms.time * 0.34 + input.extra.x * 0.01, seed * 0.11 - uniforms.time * 0.21));
         let ring = 1.0 - smoothstep(0.026, 0.145, abs(d - 0.82));
         let ripple = 0.72 + 0.28 * n;
         alpha = input.color.a * intensity * ring * ripple * (1.0 - progress * 0.72);
@@ -2045,12 +2348,14 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
         alpha = input.color.a * intensity * clamp(outer + inner * 0.62 + horizontal * 0.52 + vertical * 0.52 + sweep * 0.5, 0.0, 1.15);
         color = mix(vec3f(0.46, 0.84, 1.0), vec3f(1.0, 0.98, 0.78), outer * 0.35 + sweep * 0.3);
     } else if (inKind(kind, 2.0)) {
+        let n = noise(input.local * 3.2 + vec2f(seed * 0.17 + uniforms.time * 0.34 + input.extra.x * 0.01, seed * 0.11 - uniforms.time * 0.21));
         let body = smoothstep(1.02, 0.16, d);
         let boundary = 1.0 - smoothstep(0.025, 0.12, abs(d - (0.78 + sin(uniforms.time * 1.7 + seed) * 0.025)));
         let pulse = 0.72 + 0.28 * sin(uniforms.time * 2.4 + seed);
         alpha = input.color.a * intensity * (body * 0.36 + boundary * 0.72) * (0.72 + n * 0.28) * pulse;
         color = mix(vec3f(0.36, 1.0, 0.25), vec3f(0.88, 1.0, 0.34), n * 0.55 + boundary * 0.24);
     } else if (inKind(kind, 3.0) || inKind(kind, 5.0)) {
+        let n = noise(input.local * 3.2 + vec2f(seed * 0.17 + uniforms.time * 0.34 + input.extra.x * 0.01, seed * 0.11 - uniforms.time * 0.21));
         let body = smoothstep(1.04, 0.08, d);
         let waves = 0.5 + 0.5 * sin((input.local.x + input.local.y) * 9.0 + uniforms.time * 8.0 + seed);
         alpha = input.color.a * intensity * body * (0.28 + 0.72 * n) * (0.55 + waves * 0.18);
@@ -2058,6 +2363,7 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
         sourceMix = 0.46;
         color = mix(color, vec3f(1.0, 0.54, 0.12), 0.34 + n * 0.24);
     } else if (inKind(kind, 4.0)) {
+        let n = noise(input.local * 3.2 + vec2f(seed * 0.17 + uniforms.time * 0.34 + input.extra.x * 0.01, seed * 0.11 - uniforms.time * 0.21));
         let ring = 1.0 - smoothstep(0.08, 0.28, abs(d - 0.78));
         let body = smoothstep(1.0, 0.2, d) * (1.0 - progress * 0.35);
         alpha = input.color.a * intensity * (body * 0.24 + ring * 0.62) * (0.72 + n * 0.28) * (1.0 - progress * 0.55);
@@ -2080,6 +2386,104 @@ fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
     }
 
     alpha = clamp(alpha, 0.0, 0.78);
+    if (alpha < 0.004) {
+        discard;
+    }
+
+    return vec4f(color * alpha, alpha);
+}
+`;
+
+const weatherShader = `
+struct Uniforms {
+    dt: f32,
+    wind: f32,
+    gravity: f32,
+    time: f32,
+    canvasSize: vec2f,
+    worldSize: vec2f,
+    sourceReady: f32,
+    qualityLevel: f32,
+    radialCount: f32,
+    activeParticleCount: f32,
+    worldScale: f32,
+    worldLeft: f32,
+    worldTop: f32,
+    invCanvasWidth: f32,
+    invCanvasHeight: f32,
+    weatherType: f32,
+    weatherIntensity: f32,
+    overlayScale: f32,
+    canvasPixelRatio: f32,
+    sourceScale: vec2f
+};
+
+struct VertexOut {
+    @builtin(position) position: vec4f,
+    @location(0) uv: vec2f
+};
+
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+const corners = array<vec2f, 6>(
+    vec2f(-1.0, -1.0),
+    vec2f(1.0, -1.0),
+    vec2f(-1.0, 1.0),
+    vec2f(-1.0, 1.0),
+    vec2f(1.0, -1.0),
+    vec2f(1.0, 1.0)
+);
+
+fn hash21(p: vec2f) -> f32 {
+    return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453123);
+}
+
+@vertex
+fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
+    let corner = corners[vertexIndex];
+    var output: VertexOut;
+    output.position = vec4f(corner, 0.0, 1.0);
+    output.uv = corner * 0.5 + vec2f(0.5, 0.5);
+    return output;
+}
+
+@fragment
+fn fragmentMain(input: VertexOut) -> @location(0) vec4f {
+    let weatherType = uniforms.weatherType;
+    if (weatherType < 0.5) {
+        discard;
+    }
+
+    let intensity = clamp(uniforms.weatherIntensity, 0.0, 1.0);
+    let densityScale = select(0.45, 0.72, uniforms.qualityLevel > 1.5) * select(0.5, 1.0, uniforms.qualityLevel > 0.5);
+    let pixel = input.uv * uniforms.canvasSize;
+    let wind = uniforms.wind * 0.0018;
+    var alpha = 0.0;
+    var color = vec3f(0.72, 0.86, 1.0);
+
+    if (weatherType < 1.5) {
+        let stormBoost = select(1.0, 1.18, intensity > 0.62);
+        let density = mix(18.0, 38.0, intensity) * densityScale * stormBoost;
+        let cell = vec2f(18.0, 58.0);
+        let rainOffset = vec2f(uniforms.time * uniforms.wind * 22.0, uniforms.time * 560.0);
+        let grid = floor((pixel + rainOffset) / cell);
+        let local = fract((pixel + rainOffset) / cell);
+        let seed = hash21(grid);
+        let xTarget = 0.2 + seed * 0.6;
+        let streak = (1.0 - smoothstep(0.025, 0.11, abs(local.x - xTarget))) * smoothstep(0.02, 0.18, local.y) * (1.0 - smoothstep(0.42, 0.98, local.y));
+        alpha = streak * step(seed, density / 100.0) * (0.045 + intensity * 0.075);
+        color = vec3f(0.58, 0.76, 1.0);
+    } else {
+        let cell = mix(26.0, 18.0, intensity) / max(0.55, densityScale);
+        let drift = vec2f(uniforms.time * (uniforms.wind * 10.0 + 16.0), uniforms.time * 34.0);
+        let grid = floor((pixel + drift) / cell);
+        let local = fract((pixel + drift) / cell) - vec2f(0.5, 0.5);
+        let seed = hash21(grid);
+        let flake = smoothstep(0.24, 0.02, length(local + vec2f(seed * 0.18 - 0.09, seed * 0.12 - 0.06)));
+        alpha = flake * step(seed, 0.28 + intensity * 0.22) * (0.055 + intensity * 0.08);
+        color = vec3f(0.94, 0.98, 1.0);
+    }
+
     if (alpha < 0.004) {
         discard;
     }

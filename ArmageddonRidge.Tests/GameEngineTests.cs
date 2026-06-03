@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using ArmageddonRidge.Core;
 using ArmageddonRidge.Core.Content;
@@ -69,6 +70,44 @@ public sealed class GameEngineTests
 
         Assert.NotEmpty(result.Trail);
         Assert.True(result.Performance.CpuPlanningMs >= 0);
+    }
+
+    [Fact]
+    public void CpuOraclePlanningStaysWithinPerfSmokeBudget()
+    {
+        var engine = CreateEngine();
+        var seeds = new[] { 123, 424242, 777333 };
+        var started = Stopwatch.StartNew();
+
+        foreach (var seed in seeds)
+        {
+            var settings = new MatchSettings(Difficulty: Difficulty.Oracle, TerrainSeed: seed, EnableShop: false);
+            var state = engine.NewMatch(settings);
+            engine.StartBattle(state);
+            state.CurrentTurn = TurnOwner.Cpu;
+
+            var plan = engine.Cpu.PlanShot(state, settings);
+
+            Assert.True(state.CpuTank.HasWeapon(plan.WeaponId) || plan.WeaponId == WeaponIds.PeaShell);
+        }
+
+        started.Stop();
+        Assert.True(started.ElapsedMilliseconds < 2_000, $"CPU planning smoke took {started.ElapsedMilliseconds} ms.");
+    }
+
+    [Fact]
+    public async Task CpuAsyncPlanningObservesCancellation()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(Difficulty: Difficulty.Oracle, TerrainSeed: 424242, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        engine.StartBattle(state);
+        state.CurrentTurn = TurnOwner.Cpu;
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await engine.PlanCurrentCpuTurnAsync(state, settings, cancellation.Token));
     }
 
     [Fact]
