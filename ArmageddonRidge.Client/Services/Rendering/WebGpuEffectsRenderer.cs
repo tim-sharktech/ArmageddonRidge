@@ -167,18 +167,32 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
         bool healthHit,
         bool reducedMotion,
         string phase,
-        bool patriotOverlayEnabled) =>
-        new
+        bool patriotOverlayEnabled)
+    {
+        var trail = RenderPayloadSanitizer.BuildEffectTrailPayload(resolution.Trail, 160);
+        var explosions = RenderPayloadSanitizer.BuildEffectExplosionPayload(resolution.Explosions);
+        float? interceptX = null;
+        float? interceptY = null;
+        var hasValidIntercept = false;
+        if (resolution.Intercepted
+            && RenderPayloadSanitizer.TryGetFinitePoint(resolution.InterceptPoint, out var resolvedInterceptX, out var resolvedInterceptY))
+        {
+            hasValidIntercept = true;
+            interceptX = resolvedInterceptX;
+            interceptY = resolvedInterceptY;
+        }
+
+        return new
         {
             resolution.WeaponId,
             resolution.OwnerTankId,
             VisualKind = resolution.VisualKind.ToString(),
-            resolution.Intercepted,
-            InterceptX = resolution.InterceptPoint?.X,
-            InterceptY = resolution.InterceptPoint?.Y,
-            TrailPointCount = resolution.Trail.Count,
-            Trail = DownsampleTrail(resolution.Trail, 160),
-            Explosions = ExplosionPayload(resolution.Explosions),
+            Intercepted = hasValidIntercept,
+            InterceptX = interceptX,
+            InterceptY = interceptY,
+            TrailPointCount = trail.Length,
+            Trail = trail,
+            Explosions = explosions,
             TerrainColumnsTouched = resolution.Performance.TerrainColumnsTouched,
             Wind = wind,
             TerrainRevision = terrainRevision,
@@ -188,6 +202,7 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
             Phase = phase,
             PatriotOverlayEnabled = patriotOverlayEnabled
         };
+    }
 
     private static object BuildTerrainPayload(
         ShotResolution resolution,
@@ -198,7 +213,7 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
         {
             resolution.WeaponId,
             VisualKind = resolution.VisualKind.ToString(),
-            Explosions = ExplosionPayload(resolution.Explosions),
+            Explosions = RenderPayloadSanitizer.BuildEffectExplosionPayload(resolution.Explosions),
             TerrainColumnsTouched = resolution.Performance.TerrainColumnsTouched,
             Wind = wind,
             TerrainRevision = terrainRevision,
@@ -225,46 +240,6 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
             tank.Y,
             tank.IsCpu
         };
-
-    private static object[] ExplosionPayload(IReadOnlyList<ExplosionResult> explosions)
-    {
-        var payload = new object[explosions.Count];
-        for (var i = 0; i < explosions.Count; i++)
-        {
-            var explosion = explosions[i];
-            payload[i] = new
-            {
-                X = explosion.Center.X,
-                Y = explosion.Center.Y,
-                Radius = explosion.DamageRadius,
-                TerrainRadius = explosion.TerrainRadius,
-                explosion.Nuclear,
-                Dirt = explosion.DirtAdded,
-                VisualKind = explosion.VisualKind.ToString(),
-                explosion.PlayerDamage,
-                explosion.CpuDamage,
-                TriggerIndex = explosion.TriggerTrailIndex
-            };
-        }
-
-        return payload;
-    }
-
-    private static object[] DownsampleTrail(IReadOnlyList<Vector2> trail, int maxPoints)
-    {
-        if (trail.Count == 0) return [];
-
-        var count = Math.Min(trail.Count, maxPoints);
-        var result = new object[count];
-        var stride = trail.Count <= count ? 1 : (trail.Count - 1) / (float)Math.Max(1, count - 1);
-        for (var i = 0; i < count; i++)
-        {
-            var point = trail[Math.Min(trail.Count - 1, (int)MathF.Round(i * stride))];
-            result[i] = new { X = point.X, Y = point.Y };
-        }
-
-        return result;
-    }
 
     private static WebGpuEffectsStats DisabledStats(string reason) =>
         new()

@@ -53,6 +53,33 @@ internal static class RenderPayloadSanitizer
         return result;
     }
 
+    public static EffectPointPayload[] BuildEffectTrailPayload(IReadOnlyList<Vector2> trail, int maxPoints)
+    {
+        if (maxPoints < 1 || trail.Count == 0) return [];
+
+        var finite = new List<Vector2>(trail.Count);
+        for (var i = 0; i < trail.Count; i++)
+        {
+            var point = trail[i];
+            if (IsFinite(point.X, point.Y))
+            {
+                finite.Add(point);
+            }
+        }
+
+        if (finite.Count == 0) return [];
+        var count = Math.Min(finite.Count, maxPoints);
+        var result = new EffectPointPayload[count];
+        var stride = finite.Count <= count ? 1 : (finite.Count - 1) / (float)Math.Max(1, count - 1);
+        for (var i = 0; i < count; i++)
+        {
+            var point = finite[Math.Min(finite.Count - 1, (int)MathF.Round(i * stride))];
+            result[i] = new EffectPointPayload(point.X, point.Y);
+        }
+
+        return result;
+    }
+
     public static ShotExplosionPayload[] BuildExplosionPayload(
         IReadOnlyList<ExplosionResult> explosions,
         string? weaponId)
@@ -87,6 +114,33 @@ internal static class RenderPayloadSanitizer
         return payload.ToArray();
     }
 
+    public static EffectExplosionPayload[] BuildEffectExplosionPayload(IReadOnlyList<ExplosionResult> explosions)
+    {
+        var payload = new List<EffectExplosionPayload>(explosions.Count);
+        for (var i = 0; i < explosions.Count; i++)
+        {
+            var explosion = explosions[i];
+            if (!IsFinite(explosion.Center.X, explosion.Center.Y)) continue;
+
+            var radius = PositiveOrDefault(explosion.DamageRadius, 32);
+            if (radius <= 0) continue;
+
+            payload.Add(new EffectExplosionPayload(
+                explosion.Center.X,
+                explosion.Center.Y,
+                radius,
+                NonNegativeOrDefault(explosion.TerrainRadius, 0),
+                explosion.Nuclear,
+                explosion.DirtAdded,
+                explosion.VisualKind.ToString(),
+                FiniteOrDefault(explosion.PlayerDamage, 0),
+                FiniteOrDefault(explosion.CpuDamage, 0),
+                explosion.TriggerTrailIndex));
+        }
+
+        return payload.ToArray();
+    }
+
     public static ShotPlaybackOptionsPayload BuildPlaybackOptions(
         bool intercepted,
         Vector2? interceptPoint,
@@ -105,6 +159,23 @@ internal static class RenderPayloadSanitizer
             visualKind);
     }
 
+    public static bool TryGetFinitePoint(Vector2? point, out float x, out float y)
+    {
+        if (point is { } value && IsFinite(value.X, value.Y))
+        {
+            x = value.X;
+            y = value.Y;
+            return true;
+        }
+
+        x = 0;
+        y = 0;
+        return false;
+    }
+
+    private static float FiniteOrDefault(float value, float fallback) =>
+        float.IsFinite(value) ? value : fallback;
+
     private static float PositiveOrDefault(float value, float fallback) =>
         float.IsFinite(value) && value > 0 ? value : fallback;
 
@@ -115,6 +186,8 @@ internal static class RenderPayloadSanitizer
 }
 
 internal sealed record ShotPointPayload(float x, float y);
+
+internal sealed record EffectPointPayload(float X, float Y);
 
 internal sealed record ShotExplosionPayload(
     float x,
@@ -132,6 +205,18 @@ internal sealed record ShotExplosionPayload(
     bool patriotIntercept,
     bool shieldHit,
     int triggerIndex);
+
+internal sealed record EffectExplosionPayload(
+    float X,
+    float Y,
+    float Radius,
+    float TerrainRadius,
+    bool Nuclear,
+    bool Dirt,
+    string VisualKind,
+    float PlayerDamage,
+    float CpuDamage,
+    int TriggerIndex);
 
 internal sealed record ShotPlaybackOptionsPayload(
     bool intercepted,
