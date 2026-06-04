@@ -29,6 +29,17 @@ public sealed class TankInventoryTests
         Assert.True(tank.HasWeapon(WeaponIds.PeaShell));
     }
 
+    [Fact]
+    public void WeaponInventoryRejectsOverflowingStackCounts()
+    {
+        var tank = Tank();
+        tank.AddWeapon(WeaponIds.HeavyShell, int.MaxValue);
+
+        Assert.Throws<InvalidOperationException>(() => tank.AddWeapon(WeaponIds.HeavyShell, 1));
+        Assert.Equal(int.MaxValue, tank.GetInventoryCount(WeaponIds.HeavyShell));
+        Assert.True(tank.HasWeapon(WeaponIds.HeavyShell));
+    }
+
     private static Tank Tank() => new()
     {
         Id = "test",

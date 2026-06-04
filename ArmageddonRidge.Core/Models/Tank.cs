@@ -129,7 +129,17 @@ public sealed class Tank
             throw new ArgumentOutOfRangeException(nameof(count), "Weapon count must be positive.");
         }
 
-        if (!Inventory.TryAdd(weaponId, count)) Inventory[weaponId] += count;
+        if (Inventory.TryGetValue(weaponId, out var currentCount))
+        {
+            var nextCount = (long)currentCount + count;
+            if (nextCount > int.MaxValue)
+                throw new InvalidOperationException($"Tank {Id} inventory for {weaponId} would exceed the maximum supported count.");
+
+            Inventory[weaponId] = (int)nextCount;
+            return;
+        }
+
+        Inventory[weaponId] = count;
     }
 
     /// <summary>
