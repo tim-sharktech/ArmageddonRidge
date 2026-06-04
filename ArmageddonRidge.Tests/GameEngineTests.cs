@@ -646,6 +646,43 @@ public sealed class GameEngineTests
         Assert.Equal(2, state.PlayerTank.TracerRoundCharges);
     }
 
+    [Theory]
+    [InlineData(UpgradeType.TracerRounds)]
+    [InlineData(UpgradeType.PatriotBattery)]
+    public void UpgradeChargeOverflowDoesNotSpendCash(UpgradeType upgrade)
+    {
+        var engine = CreateEngine();
+        var state = engine.NewMatch(new MatchSettings(TerrainSeed: 123, StartingCash: int.MaxValue));
+        if (upgrade == UpgradeType.TracerRounds)
+            state.PlayerTank.TracerRoundCharges = int.MaxValue;
+        else
+            state.PlayerTank.PatriotBatteryCharges = int.MaxValue;
+        var before = state.PlayerTank.Cash;
+
+        var bought = engine.BuyUpgrade(state, upgrade);
+
+        Assert.False(bought);
+        Assert.Equal(before, state.PlayerTank.Cash);
+        if (upgrade == UpgradeType.TracerRounds)
+            Assert.Equal(int.MaxValue, state.PlayerTank.TracerRoundCharges);
+        else
+            Assert.Equal(int.MaxValue, state.PlayerTank.PatriotBatteryCharges);
+    }
+
+    [Fact]
+    public void RepairKitDoesNotOverflowNearMaximumHealth()
+    {
+        var engine = CreateEngine();
+        var state = engine.NewMatch(new MatchSettings(TerrainSeed: 123));
+        state.PlayerTank.MaxHealth = int.MaxValue;
+        state.PlayerTank.Health = int.MaxValue - 1;
+
+        var bought = engine.BuyUpgrade(state, UpgradeType.RepairKit);
+
+        Assert.True(bought);
+        Assert.Equal(int.MaxValue, state.PlayerTank.Health);
+    }
+
     [Fact]
     public void BunkerBusterBurrowsIntoTerrainBeforeExploding()
     {

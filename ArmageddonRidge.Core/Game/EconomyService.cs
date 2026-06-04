@@ -37,10 +37,23 @@ public sealed class EconomyService(WeaponCatalog weapons, UpgradeCatalog upgrade
     {
         var upgrade = _upgrades.Get(upgradeType);
         if (tank.Cash < upgrade.Cost) return false;
+        if (!CanApplyUpgrade(tank, upgradeType)) return false;
 
+        ApplyUpgrade(tank, upgradeType);
         tank.Cash -= upgrade.Cost;
-        tank.Upgrades.Add(upgradeType);
+        return true;
+    }
 
+    private static bool CanApplyUpgrade(Tank tank, UpgradeType upgradeType) => upgradeType switch
+    {
+        UpgradeType.TracerRounds => tank.TracerRoundCharges < int.MaxValue,
+        UpgradeType.PatriotBattery => tank.PatriotBatteryCharges < int.MaxValue,
+        _ => true
+    };
+
+    private static void ApplyUpgrade(Tank tank, UpgradeType upgradeType)
+    {
+        tank.Upgrades.Add(upgradeType);
         switch (upgradeType)
         {
             case UpgradeType.LightShield:
@@ -53,7 +66,7 @@ public sealed class EconomyService(WeaponCatalog weapons, UpgradeCatalog upgrade
                 tank.HasParachute = true;
                 break;
             case UpgradeType.RepairKit:
-                tank.Health = Math.Min(tank.MaxHealth, tank.Health + 35);
+                tank.Health = (int)Math.Min(tank.MaxHealth, (long)tank.Health + 35);
                 break;
             case UpgradeType.Battery:
                 tank.Shield += 25;
@@ -65,8 +78,6 @@ public sealed class EconomyService(WeaponCatalog weapons, UpgradeCatalog upgrade
                 tank.PatriotBatteryCharges++;
                 break;
         }
-
-        return true;
     }
 
     /// <summary>
