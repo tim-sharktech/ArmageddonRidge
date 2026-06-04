@@ -59,4 +59,17 @@ public sealed record GameSettings(
     int StartingCash = GameConstants.StartingCash,
     bool TargetingComputerEnabledByDefault = true,
     RenderMode RenderMode = RenderMode.Hybrid,
-    bool WebGpuEffectsEnabled = true);
+    bool WebGpuEffectsEnabled = true)
+{
+    public GameSettings Normalize() => this with
+    {
+        MasterVolume = ClampVolume(MasterVolume, 0.8f),
+        SfxVolume = ClampVolume(SfxVolume, 0.9f),
+        Difficulty = Enum.IsDefined(Difficulty) ? Difficulty : Difficulty.Normal,
+        StartingCash = Math.Clamp(StartingCash, 500, 10_000),
+        RenderMode = Enum.IsDefined(RenderMode) ? RenderMode : RenderMode.Hybrid
+    };
+
+    private static float ClampVolume(float value, float fallback) =>
+        float.IsFinite(value) ? Math.Clamp(value, 0f, 1f) : fallback;
+}

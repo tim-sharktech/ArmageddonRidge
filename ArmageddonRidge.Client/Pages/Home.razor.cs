@@ -173,16 +173,17 @@ public partial class Home
             var save = await Storage.GetAsync<SaveGame>("armageddon-ridge-save");
             if (save is not null)
             {
+                var settings = save.Settings.Normalize();
                 _bestScore = save.BestScore;
-                _difficulty = save.Settings.Difficulty;
-                _sfxVolume = save.Settings.SfxVolume;
-                _screenShake = save.Settings.ScreenShake;
-                _reducedMotion = save.Settings.ReducedMotion;
-                _targetingComputerEnabledByDefault = save.Settings.TargetingComputerEnabledByDefault;
-                _enableNuclearWeapons = save.Settings.EnableNuclearWeapons;
-                _webGpuEffectsEnabled = save.Settings.WebGpuEffectsEnabled;
-                _renderMode = save.Settings.RenderMode;
-                _startingCash = Math.Clamp(save.Settings.StartingCash, 500, 10_000);
+                _difficulty = settings.Difficulty;
+                _sfxVolume = settings.SfxVolume;
+                _screenShake = settings.ScreenShake;
+                _reducedMotion = settings.ReducedMotion;
+                _targetingComputerEnabledByDefault = settings.TargetingComputerEnabledByDefault;
+                _enableNuclearWeapons = settings.EnableNuclearWeapons;
+                _webGpuEffectsEnabled = settings.WebGpuEffectsEnabled;
+                _renderMode = settings.RenderMode;
+                _startingCash = settings.StartingCash;
                 await Renderer.SetModeAsync(_renderMode);
                 await Audio.SetVolumeAsync(_sfxVolume);
                 StateHasChanged();
