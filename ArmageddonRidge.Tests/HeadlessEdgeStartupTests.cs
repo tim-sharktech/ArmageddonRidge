@@ -61,6 +61,7 @@ public sealed class HeadlessEdgeStartupTests
         Assert.True(result.BattlefieldRendered, "The battlefield canvas did not render after starting a duel.");
         Assert.True(result.EffectsCanvasRendered, "The WebGPU effects overlay canvas did not render after starting a duel.");
         Assert.True(result.BattleConsoleRendered, "The bottom battle console did not render after starting a duel.");
+        Assert.True(result.CorruptSaveIgnored, "A malformed persisted save prevented the client from booting.");
         Assert.True(result.ShopPurchaseSucceeded, "The shop did not allow buying a Heavy Shell before battle.");
         Assert.True(result.DroneSwarmPurchaseSucceeded, "The shop did not allow buying a Shahed Drone Swarm before battle.");
         Assert.True(result.DroneSwarmSelectable, "The purchased Shahed Drone Swarm was not available in the battle weapon selector.");
@@ -289,6 +290,9 @@ public sealed class HeadlessEdgeStartupTests
                 await client.SetViewportAsync(options.ViewportWidth.Value, options.ViewportHeight.Value, mobile: true);
             }
 
+            if (options.CorruptSaveBeforeBoot)
+                await client.AddScriptToEvaluateOnNewDocumentAsync("localStorage.setItem('armageddon-ridge-save', '{broken save json');");
+
             await client.NavigateAsync(appUrl);
             var gameRootRendered = await client.WaitForBooleanAsync("Boolean(document.querySelector('.game-root'))", BrowserStartupTimeout);
             if (!gameRootRendered)
@@ -297,6 +301,7 @@ public sealed class HeadlessEdgeStartupTests
                 gameRootRendered = await client.WaitForBooleanAsync("Boolean(document.querySelector('.game-root'))", BrowserStartupTimeout);
             }
             var startupDiagnostics = gameRootRendered ? string.Empty : await client.CaptureStartupDiagnosticsAsync();
+            var corruptSaveIgnored = !options.CorruptSaveBeforeBoot || gameRootRendered;
 
             if (gameRootRendered)
             {
@@ -632,6 +637,7 @@ public sealed class HeadlessEdgeStartupTests
                 battlefieldRendered,
                 effectsCanvasRendered,
                 battleConsoleRendered,
+                corruptSaveIgnored,
                 shopPurchaseSucceeded,
                 droneSwarmPurchaseSucceeded,
                 droneSwarmSelectable,
@@ -777,6 +783,7 @@ public sealed class HeadlessEdgeStartupTests
         bool BattlefieldRendered,
         bool EffectsCanvasRendered,
         bool BattleConsoleRendered,
+        bool CorruptSaveIgnored,
         bool ShopPurchaseSucceeded,
         bool DroneSwarmPurchaseSucceeded,
         bool DroneSwarmSelectable,
@@ -813,9 +820,10 @@ public sealed class HeadlessEdgeStartupTests
         bool UseFullWasmRenderer,
         int? ViewportWidth = null,
         int? ViewportHeight = null,
-        bool ExpectConsoleBelowBattlefield = false)
+        bool ExpectConsoleBelowBattlefield = false,
+        bool CorruptSaveBeforeBoot = false)
     {
-        public static BrowserSmokeOptions Default { get; } = new(false, false);
+        public static BrowserSmokeOptions Default { get; } = new(false, false, CorruptSaveBeforeBoot: true);
 
         public static BrowserSmokeOptions WebGpuEffectsDisabled { get; } = new(true, false);
 
@@ -902,6 +910,11 @@ public sealed class HeadlessEdgeStartupTests
         public Task ReloadIgnoringCacheAsync()
         {
             return SendAsync("Page.reload", new Dictionary<string, object?> { ["ignoreCache"] = true });
+        }
+
+        public Task AddScriptToEvaluateOnNewDocumentAsync(string source)
+        {
+            return SendAsync("Page.addScriptToEvaluateOnNewDocument", new Dictionary<string, object?> { ["source"] = source });
         }
 
         public async Task<bool> EvaluateBooleanAsync(string expression)

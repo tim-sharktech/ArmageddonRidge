@@ -17,7 +17,20 @@ public sealed class BrowserStorage(IJSRuntime js)
     public async ValueTask<T?> GetAsync<T>(string key)
     {
         var json = await js.InvokeAsync<string?>("localStorage.getItem", key);
-        return string.IsNullOrWhiteSpace(json) ? default : JsonSerializer.Deserialize<T>(json, JsonOptions);
+        if (string.IsNullOrWhiteSpace(json)) return default;
+
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+        catch (NotSupportedException)
+        {
+            return default;
+        }
     }
 
     /// <summary>
