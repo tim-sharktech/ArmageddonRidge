@@ -138,6 +138,28 @@ public sealed class HybridCanvasRenderPayloadTests
         Assert.Equal(24, interceptY);
         Assert.False(invalidIntercept);
     }
+
+    [Fact]
+    public void RadiationPayloadDropsNonFiniteZonesBeforeSceneInterop()
+    {
+        var zones = new[]
+        {
+            new RadiationZone(new Vector2(float.NaN, 200), 60, 2, 5, ShotVisualKind.Nuclear),
+            new RadiationZone(new Vector2(100, 200), float.PositiveInfinity, 2, 5, ShotVisualKind.Nuclear),
+            new RadiationZone(new Vector2(120, 220), 60, 0, 5, ShotVisualKind.Lava),
+            new RadiationZone(new Vector2(140, 240), 70, 3, 5, ShotVisualKind.Lava)
+        };
+
+        var payload = RenderPayloadSanitizer.BuildRadiationPayload(zones);
+
+        var zone = Assert.Single(payload);
+        Assert.Equal(140, zone.X);
+        Assert.Equal(240, zone.Y);
+        Assert.Equal(70, zone.Radius);
+        Assert.Equal(3, zone.Turns);
+        Assert.True(zone.Lava);
+        Assert.Equal(ShotVisualKind.Lava.ToString(), zone.VisualKind);
+    }
 }
 
 file static class ShotExplosionPayloadTestExtensions

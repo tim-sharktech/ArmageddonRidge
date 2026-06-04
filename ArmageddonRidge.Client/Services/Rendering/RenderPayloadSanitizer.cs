@@ -141,6 +141,32 @@ internal static class RenderPayloadSanitizer
         return payload.ToArray();
     }
 
+    public static RenderRadiationZone[] BuildRadiationPayload(IReadOnlyList<RadiationZone> zones)
+    {
+        var payload = new List<RenderRadiationZone>(zones.Count);
+        for (var i = 0; i < zones.Count; i++)
+        {
+            var zone = zones[i];
+            if (!IsFinite(zone.Center.X, zone.Center.Y)
+                || !float.IsFinite(zone.Radius)
+                || zone.Radius <= 0
+                || zone.TurnsRemaining <= 0)
+            {
+                continue;
+            }
+
+            payload.Add(new RenderRadiationZone(
+                zone.Center.X,
+                zone.Center.Y,
+                zone.Radius,
+                zone.TurnsRemaining,
+                zone.VisualKind.ToString(),
+                zone.VisualKind == ShotVisualKind.Lava || zone.VisualKind == ShotVisualKind.Fire));
+        }
+
+        return payload.ToArray();
+    }
+
     public static ShotPlaybackOptionsPayload BuildPlaybackOptions(
         bool intercepted,
         Vector2? interceptPoint,

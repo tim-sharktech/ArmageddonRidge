@@ -54,6 +54,8 @@ public sealed class ExplosionService
         for (var i = 0; i < zones.Count; i++)
         {
             var zone = zones[i];
+            if (!IsValidRadiationZone(zone)) continue;
+
             if (Vector2.DistanceSquared(tank.Center, zone.Center) <= zone.Radius * zone.Radius)
             {
                 total += zone.DamagePerTurn;
@@ -78,6 +80,14 @@ public sealed class ExplosionService
             else zones[i] = zone;
         }
     }
+
+    private static bool IsValidRadiationZone(RadiationZone zone) =>
+        float.IsFinite(zone.Center.X)
+        && float.IsFinite(zone.Center.Y)
+        && float.IsFinite(zone.Radius)
+        && zone.Radius > 0
+        && float.IsFinite(zone.DamagePerTurn)
+        && zone.DamagePerTurn > 0;
 
     private static float ApplyDamage(Tank tank, Vector2 center, WeaponDefinition weapon)
     {

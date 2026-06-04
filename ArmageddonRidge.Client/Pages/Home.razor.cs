@@ -572,7 +572,7 @@ public partial class Home
             _state.SelectedWeaponId,
             PreviewTrailDto(),
             _tracerTrails.ToArray(),
-            RadiationDto(_state.RadiationZones),
+            RenderPayloadSanitizer.BuildRadiationPayload(_state.RadiationZones),
             TankDto(_state.PlayerTank, _state.Terrain),
             TankDto(_state.CpuTank, _state.Terrain),
             _playerHurt,
@@ -613,24 +613,6 @@ public partial class Home
         };
         var intensity = 0.34f + ((Math.Abs(HashCode.Combine(state.RandomSeed, state.RoundNumber, state.Wind)) % 36) / 100f);
         return new RenderWeather(type, intensity);
-    }
-
-    private static RenderRadiationZone[] RadiationDto(IReadOnlyList<RadiationZone> zones)
-    {
-        var radiation = new RenderRadiationZone[zones.Count];
-        for (var i = 0; i < zones.Count; i++)
-        {
-            var zone = zones[i];
-            radiation[i] = new RenderRadiationZone(
-                zone.Center.X,
-                zone.Center.Y,
-                zone.Radius,
-                zone.TurnsRemaining,
-                zone.VisualKind.ToString(),
-                zone.VisualKind == ShotVisualKind.Lava || zone.VisualKind == ShotVisualKind.Fire);
-        }
-
-        return radiation;
     }
 
     private bool HasTracerRounds =>
