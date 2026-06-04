@@ -919,7 +919,7 @@ public partial class Home
 
     private async Task HandleRenderModeChangedAsync(ChangeEventArgs args)
     {
-        if (!Enum.TryParse<RenderMode>(args.Value?.ToString(), out var mode)) return;
+        if (!Enum.TryParse<RenderMode>(args.Value?.ToString(), out var mode) || !Enum.IsDefined(mode)) return;
 
         _renderMode = mode;
         await Renderer.SetModeAsync(_renderMode);
