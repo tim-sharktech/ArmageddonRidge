@@ -20,7 +20,11 @@ public sealed class TerrainMask
         if (solidTop.Count != width)
             throw new ArgumentException("Terrain heightmap width mismatch.", nameof(solidTop));
 
-        _solidTop = solidTop.ToArray();
+        _solidTop = new float[width];
+        for (var i = 0; i < width; i++)
+        {
+            _solidTop[i] = NormalizeSurfaceY(solidTop[i], height);
+        }
     }
 
     /// <summary>
@@ -58,7 +62,7 @@ public sealed class TerrainMask
 
         for (var i = 0; i < _solidTop.Length; i++)
         {
-            _solidTop[i] = source._solidTop[i];
+            _solidTop[i] = NormalizeSurfaceY(source._solidTop[i], Height);
         }
     }
 
@@ -154,6 +158,8 @@ public sealed class TerrainMask
 
     private int ApplyCircleScalar(Vector2 center, float radius, bool removeTerrain)
     {
+        if (!IsValidCircle(center, radius)) return 0;
+
         var touched = 0;
         var minX = Math.Max(0, (int)MathF.Floor(center.X - radius));
         var maxX = Math.Min(Width - 1, (int)MathF.Ceiling(center.X + radius));
@@ -179,6 +185,8 @@ public sealed class TerrainMask
 
     private int ApplyCircleSimd(Vector2 center, float radius, bool removeTerrain)
     {
+        if (!IsValidCircle(center, radius)) return 0;
+
         var touched = 0;
         var minX = Math.Max(0, (int)MathF.Floor(center.X - radius));
         var maxX = Math.Min(Width - 1, (int)MathF.Ceiling(center.X + radius));
@@ -242,6 +250,12 @@ public sealed class TerrainMask
         for (var i = 0; i < lanes.Length; i++) lanes[i] = i;
         return new Vector<float>(lanes);
     }
+
+    private static bool IsValidCircle(Vector2 center, float radius) =>
+        float.IsFinite(center.X) && float.IsFinite(center.Y) && float.IsFinite(radius) && radius > 0;
+
+    private static float NormalizeSurfaceY(float y, int height) =>
+        float.IsFinite(y) ? Math.Clamp(y, 0, height) : height;
 }
 
 /// <summary>

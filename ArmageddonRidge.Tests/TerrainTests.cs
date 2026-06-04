@@ -104,6 +104,47 @@ public sealed class TerrainTests
         Assert.Equal(0, second);
     }
 
+    [Fact]
+    public void TerrainMaskNormalizesInvalidSurfaceHeights()
+    {
+        var terrain = new TerrainMask(5, 100, [float.NaN, float.PositiveInfinity, float.NegativeInfinity, -15, 125]);
+
+        Assert.Equal([100, 100, 100, 0, 100], terrain.SolidTop);
+    }
+
+    [Fact]
+    public void CopyFromNormalizesInvalidSourceSurfaceHeights()
+    {
+        var target = new TerrainMask(3, 100, [50, 50, 50]);
+        var source = new TerrainMask(3, 100, [20, 30, 40]);
+        var sourceHeights = Assert.IsType<float[]>(source.SolidTop);
+        sourceHeights[0] = float.NaN;
+        sourceHeights[1] = -1;
+        sourceHeights[2] = 101;
+
+        target.CopyFrom(source);
+
+        Assert.Equal([100, 0, 100], target.SolidTop);
+    }
+
+    [Theory]
+    [InlineData(float.NaN, 450, 60)]
+    [InlineData(500, float.NaN, 60)]
+    [InlineData(500, 450, float.NaN)]
+    [InlineData(500, 450, 0)]
+    [InlineData(500, 450, -1)]
+    public void InvalidCircleDeformationIsNoOp(float x, float y, float radius)
+    {
+        var heights = Enumerable.Repeat(500f, 1200).ToArray();
+        var scalar = new TerrainMask(1200, 700, heights);
+        var simd = new TerrainMask(1200, 700, heights);
+        var center = new Vector2(x, y);
+
+        Assert.Equal(0, scalar.RemoveCircle(center, radius, TerrainDeformationMode.Scalar));
+        Assert.Equal(0, simd.AddCircle(center, radius, TerrainDeformationMode.Simd));
+        AssertTerrainEqual(scalar, simd);
+    }
+
     private static void AssertTerrainEqual(TerrainMask expected, TerrainMask actual)
     {
         Assert.Equal(expected.Width, actual.Width);
