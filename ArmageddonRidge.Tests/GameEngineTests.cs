@@ -821,6 +821,7 @@ public sealed class GameEngineTests
         Assert.Equal(GamePhase.RoundOver, state.Phase);
         Assert.True(state.CpuTank.IsDestroyed);
         Assert.Contains(result.Events, e => e.Contains("Victory", StringComparison.Ordinal));
+        Assert.Contains("Victory", state.EventLog.Last(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -900,6 +901,7 @@ public sealed class GameEngineTests
         Assert.Equal(GamePhase.RoundOver, state.Phase);
         Assert.True(state.PlayerTank.IsDestroyed);
         Assert.Contains(result.Events, e => e.Contains("Defeat", StringComparison.Ordinal));
+        Assert.Contains("Defeat", state.EventLog.Last(), StringComparison.Ordinal);
     }
 
     private static GameEngine CreateEngine() => new(new WeaponCatalog(), new UpgradeCatalog());

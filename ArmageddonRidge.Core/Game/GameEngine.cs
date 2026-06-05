@@ -250,7 +250,10 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
 
         var winner = EndRoundIfWon(state);
         if (winner is not null)
+        {
             events.Add(winner == TurnOwner.Player ? "Victory. The ridge salutes your math." : "Defeat. The CPU is insufferable now.");
+            state.EventLog.Add(events[^1]);
+        }
 
         var perf = new PerformanceSample(simulationWatch.Elapsed.TotalMilliseconds, terrainWatch.Elapsed.TotalMilliseconds, cpuPlanningMs, simulation.Trail.Count, touched);
         state.LastPerformance = perf;
