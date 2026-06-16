@@ -94,7 +94,12 @@ export async function loadSprites(version) {
     await Promise.allSettled([
         loadExtraSprite("shahedDrone", "assets/sprites/shahed-drone.png", version),
         loadExtraSprite("gbu57Mop", "assets/sprites/gbu-57-mop.png", version),
-        loadExtraSprite("lavaPool", "assets/sprites/lava-pool.png", version)
+        loadExtraSprite("lavaPool", "assets/sprites/lava-pool.png", version),
+        loadExtraSprite("tankDebrisHull", "assets/sprites/tank-debris-hull.png", version),
+        loadExtraSprite("tankDebrisTurret", "assets/sprites/tank-debris-turret.png", version),
+        loadExtraSprite("tankDebrisTread", "assets/sprites/tank-debris-tread.png", version),
+        loadExtraSprite("tankDebrisBarrel", "assets/sprites/tank-debris-barrel.png", version),
+        loadExtraSprite("tankDebrisPlate", "assets/sprites/tank-debris-plate.png", version)
     ]);
 }
 

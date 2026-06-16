@@ -25,11 +25,11 @@ public sealed class HybridCanvasRenderer(IJSRuntime js) : IGameRenderer
         return stats with { Mode = "Hybrid (JS + WASM)", SimdHardwareAccelerated = false };
     }
 
-    public async ValueTask PlayShotAsync(RenderScene scene, ShotResolution resolution, bool screenShake)
+    public async ValueTask PlayShotAsync(RenderScene scene, ShotResolution resolution, bool screenShake, bool playerDestroyed, bool cpuDestroyed)
     {
         if (_module is null) return;
 
-        await PlayShotAsync(scene, resolution.Trail, resolution.Explosions, screenShake, resolution.WeaponId, resolution.Intercepted, resolution.InterceptPoint, resolution.OwnerTankId, resolution.VisualKind.ToString());
+        await PlayShotWithPayloadAsync(scene, resolution, screenShake, playerDestroyed, cpuDestroyed);
     }
 
     public async ValueTask<RenderStats?> GetStatsAsync()
@@ -58,22 +58,24 @@ public sealed class HybridCanvasRenderer(IJSRuntime js) : IGameRenderer
         }
     }
 
-    private async ValueTask PlayShotAsync(
+    private async ValueTask PlayShotWithPayloadAsync(
         RenderScene scene,
-        IReadOnlyList<Vector2> trail,
-        IReadOnlyList<ExplosionResult> explosions,
+        ShotResolution resolution,
         bool screenShake,
-        string? weaponId = null,
-        bool intercepted = false,
-        Vector2? interceptPoint = null,
-        string? ownerTankId = null,
-        string? visualKind = null)
+        bool playerDestroyed,
+        bool cpuDestroyed)
     {
         if (_module is null) return;
 
-        var trailPayload = RenderPayloadSanitizer.BuildTrailPayload(trail);
-        var explosionPayload = RenderPayloadSanitizer.BuildExplosionPayload(explosions, weaponId);
-        var playbackOptions = RenderPayloadSanitizer.BuildPlaybackOptions(intercepted, interceptPoint, ownerTankId, visualKind);
+        var trailPayload = RenderPayloadSanitizer.BuildTrailPayload(resolution.Trail);
+        var explosionPayload = RenderPayloadSanitizer.BuildExplosionPayload(resolution.Explosions, resolution.WeaponId);
+        var playbackOptions = RenderPayloadSanitizer.BuildPlaybackOptions(
+            resolution.Intercepted,
+            resolution.InterceptPoint,
+            resolution.OwnerTankId,
+            resolution.VisualKind.ToString(),
+            RenderPayloadSanitizer.SanitizeFinalShotDestruction(
+                FinalShotDestructionBuilder.Build(scene, resolution, scene.Wind, false, playerDestroyed, cpuDestroyed)));
 
         await _module.InvokeVoidAsync(
             "playShot",
@@ -81,7 +83,7 @@ public sealed class HybridCanvasRenderer(IJSRuntime js) : IGameRenderer
             trailPayload,
             explosionPayload,
             screenShake,
-            weaponId,
+            resolution.WeaponId,
             playbackOptions);
     }
 }

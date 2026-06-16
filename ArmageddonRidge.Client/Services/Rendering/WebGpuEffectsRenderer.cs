@@ -75,11 +75,14 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
     }
 
     public async ValueTask<WebGpuEffectsStats?> SpawnShotEffectsAsync(
+        RenderScene scene,
         ShotResolution resolution,
         int wind,
         int terrainRevision,
         bool shieldHit,
         bool healthHit,
+        bool playerDestroyed,
+        bool cpuDestroyed,
         bool reducedMotion,
         string phase,
         bool patriotOverlayEnabled = true)
@@ -90,7 +93,7 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
         {
             _stats = await _module.InvokeAsync<WebGpuEffectsStats>(
                     "spawnShotEffects",
-                    BuildShotPayload(resolution, wind, terrainRevision, shieldHit, healthHit, reducedMotion, phase, patriotOverlayEnabled))
+                    BuildShotPayload(scene, resolution, wind, terrainRevision, shieldHit, healthHit, playerDestroyed, cpuDestroyed, reducedMotion, phase, patriotOverlayEnabled))
                 ?? _stats;
         }
         catch (JSException ex)
@@ -160,17 +163,22 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
     }
 
     private static object BuildShotPayload(
+        RenderScene scene,
         ShotResolution resolution,
         int wind,
         int terrainRevision,
         bool shieldHit,
         bool healthHit,
+        bool playerDestroyed,
+        bool cpuDestroyed,
         bool reducedMotion,
         string phase,
         bool patriotOverlayEnabled)
     {
         var trail = RenderPayloadSanitizer.BuildEffectTrailPayload(resolution.Trail, 160);
         var explosions = RenderPayloadSanitizer.BuildEffectExplosionPayload(resolution.Explosions);
+        var destruction = RenderPayloadSanitizer.SanitizeFinalShotDestruction(
+            FinalShotDestructionBuilder.Build(scene, resolution, wind, reducedMotion, playerDestroyed, cpuDestroyed));
         float? interceptX = null;
         float? interceptY = null;
         var hasValidIntercept = false;
@@ -193,6 +201,7 @@ public sealed class WebGpuEffectsRenderer(IJSRuntime js) : IAsyncDisposable
             TrailPointCount = trail.Length,
             Trail = trail,
             Explosions = explosions,
+            FinalShotDestruction = destruction,
             TerrainColumnsTouched = resolution.Performance.TerrainColumnsTouched,
             Wind = wind,
             TerrainRevision = terrainRevision,

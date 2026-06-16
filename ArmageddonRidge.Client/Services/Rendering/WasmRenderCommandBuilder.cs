@@ -154,6 +154,7 @@ public sealed class WasmRenderCommandBuilder
 
     private static void AddTank(List<RenderCommand> commands, RenderTank tank, string fill, string highlight)
     {
+        if (tank.Health <= 0) return;
         if (!IsFinite4(tank.X, tank.Y, tank.Angle, tank.BuriedDepth)) return;
 
         var baseY = tank.Y - MathF.Min(tank.BuriedDepth, 18);

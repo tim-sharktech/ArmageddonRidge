@@ -25,6 +25,7 @@
   <ItemGroup>
     <Compile Include="..\ArmageddonRidge.Client\Services\Rendering\RenderScene.cs" Link="ClientRendering\RenderScene.cs" />
     <Compile Include="..\ArmageddonRidge.Client\Services\Rendering\RenderPayloadSanitizer.cs" Link="ClientRendering\RenderPayloadSanitizer.cs" />
+    <Compile Include="..\ArmageddonRidge.Client\Services\Rendering\FinalShotDestructionBuilder.cs" Link="ClientRendering\FinalShotDestructionBuilder.cs" />
     <Compile Include="..\ArmageddonRidge.Client\Services\Rendering\WasmRenderCommandBuilder.cs" Link="ClientRendering\WasmRenderCommandBuilder.cs" />
   </ItemGroup>
 

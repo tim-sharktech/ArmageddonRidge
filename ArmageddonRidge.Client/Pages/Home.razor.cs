@@ -317,11 +317,14 @@ public partial class Home
             impactFeedbackTask = PlayImpactFeedbackDuringPlaybackAsync(resolution, playerHealthBefore, cpuHealthBefore, playerShieldBefore, cpuShieldBefore);
             var effectsStats = await AwaitWithTimeoutAsync(
                 Effects.SpawnShotEffectsAsync(
+                    preShotScene,
                     resolution,
                     preShotScene.Wind,
                     _terrainRevision,
                     shieldHit,
                     healthHit,
+                    _state?.PlayerTank.IsDestroyed == true,
+                    _state?.CpuTank.IsDestroyed == true,
                     _reducedMotion,
                     "flight",
                     _renderMode == RenderMode.Hybrid).AsTask(),
@@ -329,7 +332,12 @@ public partial class Home
                 "WebGPU shot effects");
             ApplyEffectsStats(effectsStats);
             await AwaitWithTimeoutAsync(
-                Renderer.PlayShotAsync(preShotScene, resolution, _screenShake && !_reducedMotion).AsTask(),
+                Renderer.PlayShotAsync(
+                    preShotScene,
+                    resolution,
+                    _screenShake && !_reducedMotion,
+                    _state?.PlayerTank.IsDestroyed == true,
+                    _state?.CpuTank.IsDestroyed == true).AsTask(),
                 EstimateShotVisualDurationMs(resolution) + 2600,
                 "renderer shot playback");
             await impactAudioTask;
@@ -417,6 +425,12 @@ public partial class Home
         if (delay > 0) await Task.Delay(delay);
 
         if (shieldHit) await Audio.PlayAsync("shieldHit");
+        if (resolution.RoundEnded)
+        {
+            await Audio.PlayAsync("finalDestruction");
+            return;
+        }
+
         if (!shieldHit || healthHit)
             await Audio.PlayAsync(hasNuclear || HasLargeExplosion(resolution.Explosions) ? "largeExplosion" : "smallExplosion");
     }

@@ -178,11 +178,64 @@ internal static class RenderPayloadSanitizer
         return payload.ToArray();
     }
 
+    public static FinalShotDestructionPayload? SanitizeFinalShotDestruction(FinalShotDestructionPayload? destruction)
+    {
+        if (destruction is null || !destruction.Active || destruction.Pieces.Length == 0)
+        {
+            return null;
+        }
+
+        if (!IsFinite(destruction.X, destruction.Y)
+            || !float.IsFinite(destruction.Radius)
+            || destruction.Radius <= 0)
+        {
+            return null;
+        }
+
+        var pieces = new List<FinalShotDebrisPiece>(destruction.Pieces.Length);
+        for (var i = 0; i < destruction.Pieces.Length; i++)
+        {
+            var piece = destruction.Pieces[i];
+            if (!IsFinite(piece.X, piece.Y)
+                || !IsFinite(piece.Vx, piece.Vy)
+                || !AllFinite(piece.Size, piece.Mass, piece.Restitution, piece.Friction, piece.Drag, piece.Spin, piece.Lifetime, piece.R, piece.G, piece.B)
+                || piece.Size <= 0
+                || piece.Mass <= 0
+                || piece.Lifetime <= 0)
+            {
+                continue;
+            }
+
+            pieces.Add(piece with
+            {
+                Sprite = string.IsNullOrWhiteSpace(piece.Sprite) ? "plate" : piece.Sprite,
+                Size = Math.Clamp(piece.Size, 3, 48),
+                Mass = Math.Clamp(piece.Mass, 0.1f, 12),
+                Restitution = Math.Clamp(piece.Restitution, 0, 0.9f),
+                Friction = Math.Clamp(piece.Friction, 0, 0.95f),
+                Drag = Math.Clamp(piece.Drag, 0, 1.5f),
+                Lifetime = Math.Clamp(piece.Lifetime, 0.25f, 10),
+                R = Math.Clamp(piece.R, 0, 1),
+                G = Math.Clamp(piece.G, 0, 1),
+                B = Math.Clamp(piece.B, 0, 1)
+            });
+        }
+
+        return pieces.Count == 0
+            ? null
+            : destruction with
+            {
+                Radius = Math.Clamp(destruction.Radius, 12, 420),
+                Pieces = pieces.ToArray()
+            };
+    }
+
     public static ShotPlaybackOptionsPayload BuildPlaybackOptions(
         bool intercepted,
         Vector2? interceptPoint,
         string? ownerTankId,
-        string? visualKind)
+        string? visualKind,
+        FinalShotDestructionPayload? finalShotDestruction = null)
     {
         var hasValidIntercept = intercepted
             && interceptPoint is { } point
@@ -193,7 +246,8 @@ internal static class RenderPayloadSanitizer
             hasValidIntercept ? interceptPoint!.Value.X : null,
             hasValidIntercept ? interceptPoint!.Value.Y : null,
             ownerTankId,
-            visualKind);
+            visualKind,
+            finalShotDestruction);
     }
 
     public static bool TryGetFinitePoint(Vector2? point, out float x, out float y)
@@ -220,6 +274,16 @@ internal static class RenderPayloadSanitizer
         float.IsFinite(value) && value >= 0 ? value : fallback;
 
     private static bool IsFinite(float x, float y) => float.IsFinite(x) && float.IsFinite(y);
+
+    private static bool AllFinite(params float[] values)
+    {
+        for (var i = 0; i < values.Length; i++)
+        {
+            if (!float.IsFinite(values[i])) return false;
+        }
+
+        return true;
+    }
 
     private static RenderPoint[] BuildFiniteRenderPointPayload(IReadOnlyList<RenderPoint> points)
     {
@@ -275,4 +339,5 @@ internal sealed record ShotPlaybackOptionsPayload(
     float? interceptX,
     float? interceptY,
     string? ownerTankId,
-    string? visualKind);
+    string? visualKind,
+    FinalShotDestructionPayload? finalShotDestruction = null);

@@ -186,6 +186,77 @@ public sealed class WebGpuEffectsModuleTests
             $"WebGPU special weapon timing smoke failed with exit code {process.ExitCode}.{Environment.NewLine}{output}{Environment.NewLine}{error}");
     }
 
+    [Fact]
+    public async Task WebGpuFinalShotDestructionSanitizerClampsPayload()
+    {
+        var repoRoot = FindRepoRoot();
+        var modulePath = Path.GetFullPath(Path.Combine(repoRoot, "ArmageddonRidge.Client", "wwwroot", "js", "webGpuEffectsRenderer.js"));
+        var moduleUri = new Uri(modulePath).AbsoluteUri;
+        var script = $$"""
+            const effects = await import({{JsonSerializer.Serialize(moduleUri)}});
+            const pieces = Array.from({ length: 16 }, (_, index) => ({
+                victimId: 'cpu',
+                sprite: 'plate',
+                x: 100 + index,
+                y: 200,
+                vx: 50,
+                vy: -120,
+                size: index === 0 ? 999 : 10,
+                mass: 1,
+                restitution: 2,
+                friction: -1,
+                drag: 0.2,
+                spin: 1,
+                lifetime: 2,
+                r: 1,
+                g: 0.5,
+                b: 0.2,
+                seed: index
+            }));
+            pieces.push({ x: Number.NaN, y: 2, vx: 1, vy: 2 });
+            const high = effects.sanitizeFinalShotDestruction({ active: true, x: 90, y: 110, radius: 80, pieces }, { qualityTier: 'high' });
+            const reduced = effects.sanitizeFinalShotDestruction({ active: true, x: 90, y: 110, radius: 80, reducedMotion: true, pieces }, { qualityTier: 'high' });
+            if (!high || high.pieces.length !== 16) {
+                throw new Error(`Expected high quality to keep all 16 finite pieces, got ${JSON.stringify(high)}`);
+            }
+            if (high.pieces[0].size !== 48 || high.pieces[0].restitution !== 0.9 || high.pieces[0].friction !== 0) {
+                throw new Error(`Expected clamped first piece, got ${JSON.stringify(high.pieces[0])}`);
+            }
+            if (!reduced || reduced.pieces.length !== 8) {
+                throw new Error(`Expected reduced motion clamp to 8 pieces, got ${JSON.stringify(reduced)}`);
+            }
+            if (effects.sanitizeFinalShotDestruction({ active: true, x: Number.NaN, y: 1, pieces })) {
+                throw new Error('Expected malformed destruction payload to be dropped.');
+            }
+            """;
+
+        await RunNodeSmoke(repoRoot, script, "WebGPU final-shot destruction sanitizer smoke");
+    }
+
+    [Fact]
+    public async Task WebGpuFinalShotDestructionTimingFollowsImpact()
+    {
+        var repoRoot = FindRepoRoot();
+        var modulePath = Path.GetFullPath(Path.Combine(repoRoot, "ArmageddonRidge.Client", "wwwroot", "js", "webGpuEffectsRenderer.js"));
+        var moduleUri = new Uri(modulePath).AbsoluteUri;
+        var script = $$"""
+            const effects = await import({{JsonSerializer.Serialize(moduleUri)}});
+            const payload = {
+                weaponId: 'baby-missile',
+                trailPointCount: 100,
+                trail: Array.from({ length: 100 }, (_, index) => ({ x: index, y: index })),
+                finalShotDestruction: { active: true, x: 90, y: 110, radius: 80, pieces: [{ x: 90, y: 110, vx: 1, vy: -2, size: 8, mass: 1, lifetime: 1 }] }
+            };
+            const impact = effects.estimateImpactDelayMs(payload);
+            const destruction = effects.estimateFinalShotDestructionDelayMs(payload);
+            if (destruction !== impact + 95) {
+                throw new Error(`Expected destruction timing after impact, impact=${impact} destruction=${destruction}`);
+            }
+            """;
+
+        await RunNodeSmoke(repoRoot, script, "WebGPU final-shot destruction timing smoke");
+    }
+
     private static string FindRepoRoot()
     {
         var dir = AppContext.BaseDirectory;
@@ -200,5 +271,31 @@ public sealed class WebGpuEffectsModuleTests
         }
 
         throw new InvalidOperationException("Could not locate repo root.");
+    }
+
+    private static async Task RunNodeSmoke(string repoRoot, string script, string label)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "node",
+                ArgumentList = { "--input-type=module", "--eval", script },
+                WorkingDirectory = repoRoot,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        Assert.True(process.Start(), $"Failed to start node for {label}.");
+        var output = await process.StandardOutput.ReadToEndAsync();
+        var error = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        Assert.True(
+            process.ExitCode == 0,
+            $"{label} failed with exit code {process.ExitCode}.{Environment.NewLine}{output}{Environment.NewLine}{error}");
     }
 }

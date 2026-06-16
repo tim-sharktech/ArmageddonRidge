@@ -173,6 +173,27 @@ public sealed class WasmRenderCommandBuilderTests
         Assert.Contains(frame.Commands, command => command.X == 120 && command.Y == 120 && command.Fill?.Contains("123,243,255", StringComparison.Ordinal) == true);
     }
 
+    [Fact]
+    public void FullWasmFallbackSkipsDestroyedTanks()
+    {
+        var builder = new WasmRenderCommandBuilder();
+        var scene = EmptyScene() with
+        {
+            Cpu = new RenderTank("cpu", 1040, 620, 135, 0, 0, true, 620, 0)
+        };
+
+        var frame = builder.BuildFrame(scene);
+
+        Assert.DoesNotContain(frame.Commands, command =>
+            command.Op == "rect"
+            && command.X == 1040 - (GameConstants.TankCollisionWidth / 2f)
+            && command.Fill == "#ec6a5c");
+        Assert.Contains(frame.Commands, command =>
+            command.Op == "rect"
+            && command.X == 160 - (GameConstants.TankCollisionWidth / 2f)
+            && command.Fill == "#50c5b7");
+    }
+
     private static RenderScene EmptyScene()
     {
         var terrain = Enumerable.Repeat(620f, GameConstants.WorldWidth).ToArray();

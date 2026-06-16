@@ -73,6 +73,7 @@ let diagnostics = {
     benchmarkMode: false
 };
 let patriotState;
+let activeDestructionPieces = [];
 
 const maxParticles = 6000;
 const particleFloats = 12;
@@ -497,6 +498,73 @@ export function sanitizeEffectExplosions(explosions) {
     return sanitized;
 }
 
+export function sanitizeFinalShotDestruction(destruction, options = {}) {
+    const source = destruction ?? {};
+    if (!truthyPayloadValue(source, "active")) {
+        return undefined;
+    }
+
+    const pieces = payloadValue(source, "pieces");
+    if (!Array.isArray(pieces)) {
+        return undefined;
+    }
+
+    const x = finitePointCoordinate(source, "x");
+    const y = finitePointCoordinate(source, "y");
+    const radius = positiveNumber(payloadValue(source, "radius"), 96);
+    if (x === undefined || y === undefined || radius <= 0) {
+        return undefined;
+    }
+
+    const reduced = Boolean(options.reducedMotion ?? truthyPayloadValue(source, "reducedMotion"));
+    const maxPieces = destructionPieceLimit(reduced, options.qualityTier ?? qualityTier);
+    const sanitized = [];
+    for (let i = 0; i < pieces.length && sanitized.length < maxPieces; i++) {
+        const piece = pieces[i];
+        const px = finitePointCoordinate(piece, "x");
+        const py = finitePointCoordinate(piece, "y");
+        const vx = finiteNumber(payloadValue(piece, "vx"), Number.NaN);
+        const vy = finiteNumber(payloadValue(piece, "vy"), Number.NaN);
+        if (px === undefined || py === undefined || !Number.isFinite(vx) || !Number.isFinite(vy)) {
+            continue;
+        }
+
+        sanitized.push({
+            victimId: String(payloadValue(piece, "victimId") ?? ""),
+            sprite: String(payloadValue(piece, "sprite") ?? "plate"),
+            x: px,
+            y: py,
+            vx,
+            vy,
+            size: clamp(positiveNumber(payloadValue(piece, "size"), 10), 3, 48),
+            mass: clamp(positiveNumber(payloadValue(piece, "mass"), 1), 0.1, 12),
+            restitution: clamp(finiteNumber(payloadValue(piece, "restitution"), 0.42), 0, 0.9),
+            friction: clamp(finiteNumber(payloadValue(piece, "friction"), 0.55), 0, 0.95),
+            drag: clamp(finiteNumber(payloadValue(piece, "drag"), 0.3), 0, 1.5),
+            spin: clamp(finiteNumber(payloadValue(piece, "spin"), 0), -16, 16),
+            lifetime: clamp(positiveNumber(payloadValue(piece, "lifetime"), 4.5), 0.25, 10),
+            r: clamp(finiteNumber(payloadValue(piece, "r"), 0.74), 0, 1),
+            g: clamp(finiteNumber(payloadValue(piece, "g"), 0.58), 0, 1),
+            b: clamp(finiteNumber(payloadValue(piece, "b"), 0.42), 0, 1),
+            seed: finiteNumber(payloadValue(piece, "seed"), i * 997)
+        });
+    }
+
+    if (!sanitized.length) {
+        return undefined;
+    }
+
+    return {
+        active: true,
+        x,
+        y,
+        radius: clamp(radius, 12, 420),
+        mutual: truthyPayloadValue(source, "mutual"),
+        reducedMotion: reduced,
+        pieces: sanitized
+    };
+}
+
 function sanitizeEffectPayload(payload) {
     if (!payload) {
         return { trail: [], trailPointCount: 0, explosions: [] };
@@ -504,10 +572,14 @@ function sanitizeEffectPayload(payload) {
 
     const trail = sanitizeEffectPoints(payload.trail ?? payload.Trail ?? [], 1);
     const explosions = sanitizeEffectExplosions(payload.explosions ?? payload.Explosions ?? []);
+    const destruction = sanitizeFinalShotDestruction(
+        payload.finalShotDestruction ?? payload.FinalShotDestruction,
+        { reducedMotion: payload.reducedMotion ?? payload.ReducedMotion });
     return {
         ...payload,
         trail,
         explosions,
+        finalShotDestruction: destruction,
         trailPointCount: trail.length
     };
 }
@@ -539,6 +611,7 @@ export function dispose() {
     clearScheduledImpact();
     clearPatriotState();
     clearCpuState();
+    activeDestructionPieces = [];
     if (particleBuffer) particleBuffer.destroy();
     if (radialBuffer) radialBuffer.destroy();
     if (activeParticleIndexBuffer) activeParticleIndexBuffer.destroy();
@@ -749,6 +822,7 @@ function frame(now) {
     resizeCanvas();
     emitAmbient(dt, now);
     emitPatriotEffects(dt, now);
+    updateDestructionPieces(dt, now);
     const particleCount = refreshActiveParticleIndices(now);
     const radialCount = refreshActiveRadialIndices(now);
     copySourceCanvasIfNeeded(radialCount);
@@ -825,7 +899,7 @@ function clearOverlay() {
 
 function shouldContinueLoop() {
     if (!enabled || diagnostics.benchmarkMode) return enabled;
-    if (particleDirtyStart >= 0 || cachedParticleCount > 0 || cachedRadialCount > 0 || patriotState) return true;
+    if (particleDirtyStart >= 0 || cachedParticleCount > 0 || cachedRadialCount > 0 || patriotState || activeDestructionPieces.length > 0) return true;
     if (shouldRenderProceduralWeather() || hasAmbientEmitters()) return true;
     return false;
 }
@@ -1078,6 +1152,10 @@ export function estimateImpactDelayMs(payload) {
     }
 
     return Math.max(80, Math.min(3400, visualDuration - 45));
+}
+
+export function estimateFinalShotDestructionDelayMs(payload) {
+    return estimateImpactDelayMs(payload) + (truthyPayloadValue(payload, "intercepted") ? 180 : 95);
 }
 
 export function estimateExplosionDelayMs(payload, explosion) {
@@ -1397,6 +1475,10 @@ function spawnImpactEffects(payload, explosions = payload?.explosions ?? [], inc
     if (includeShieldRipple && payload?.shieldHit) {
         spawnShieldRipple(payload);
     }
+
+    if (includeShieldRipple) {
+        spawnFinalShotDestruction(payload);
+    }
 }
 
 function spawnExplosion(explosion, payload, wind) {
@@ -1690,6 +1772,118 @@ function spawnShieldRipple(payload) {
         const ry = Math.sin(angle) * randomBetween(22, 58);
         spawnParticle(x + rx, y + ry, Math.cos(angle) * 34, Math.sin(angle) * 22, 0.6, 0.9, 1, 0.62, randomBetween(3, 7), randomBetween(0.35, 0.8), kinds.plasma);
     }
+}
+
+function spawnFinalShotDestruction(payload) {
+    const destruction = sanitizeFinalShotDestruction(payload?.finalShotDestruction ?? payload?.FinalShotDestruction, {
+        reducedMotion: payload?.reducedMotion ?? payload?.ReducedMotion,
+        qualityTier
+    });
+    if (!destruction) return;
+
+    const wind = finiteNumber(payload?.wind ?? payload?.Wind, currentWind);
+    const seed = finiteNumber(destruction.pieces[0]?.seed, Math.random() * 1000);
+    spawnRadialEffect(destruction.x, destruction.y, destruction.radius * 1.25, 0.36, radialKinds.flash, destruction.mutual ? 1.6 : 1.25, [1, 0.92, 0.62, 0.66], { softness: 0.46, seed });
+    spawnRadialEffect(destruction.x, destruction.y, destruction.radius * 2.25, destruction.reducedMotion ? 0.55 : 0.92, radialKinds.shockwave, destruction.mutual ? 1.15 : 0.9, [1, 0.82, 0.38, 0.58], { softness: 0.18, seed: seed + 17 });
+    spawnRadialEffect(destruction.x, surfaceY(destruction.x), destruction.radius * 1.8, destruction.reducedMotion ? 1.0 : 2.6, radialKinds.dust, 0.74, [0.54, 0.44, 0.32, 0.34], { wind, softness: 0.5, aspect: 1.5, seed: seed + 29 });
+
+    const now = performance.now();
+    for (let i = 0; i < destruction.pieces.length; i++) {
+        const piece = destruction.pieces[i];
+        activeDestructionPieces.push({
+            ...piece,
+            born: now,
+            expires: now + piece.lifetime * 1000,
+            angle: seededUnit(piece.seed, 5) * Math.PI * 2,
+            settled: false,
+            lastSmoke: now,
+            wind
+        });
+
+        const sparkCount = destruction.reducedMotion ? 2 : 5;
+        for (let j = 0; j < sparkCount; j++) {
+            const angle = seededUnit(piece.seed, j + 11) * Math.PI * 2;
+            const speed = 60 + seededUnit(piece.seed, j + 17) * 170;
+            spawnParticle(piece.x, piece.y, Math.cos(angle) * speed + wind * 0.2, Math.sin(angle) * speed - 35, 1, 0.72, 0.36, 0.62, 2.5 + seededUnit(piece.seed, j + 23) * 4, 0.28 + seededUnit(piece.seed, j + 31) * 0.42, kinds.spark);
+        }
+    }
+
+    startLoop();
+}
+
+function updateDestructionPieces(dt, now) {
+    if (!activeDestructionPieces.length) return;
+
+    beginSpawnBatch(now);
+    const survivors = [];
+    for (const piece of activeDestructionPieces) {
+        if (now >= piece.expires) {
+            continue;
+        }
+
+        if (!piece.settled) {
+            const drag = Math.max(0, 1 - piece.drag * dt);
+            piece.vx = (piece.vx + piece.wind * 0.055 * dt) * drag;
+            piece.vy = (piece.vy + gravity * 1.45 * dt) * drag;
+            piece.x += piece.vx * dt;
+            piece.y += piece.vy * dt;
+            piece.angle += piece.spin * dt;
+            piece.spin *= Math.max(0, 1 - (piece.friction * 0.42 * dt));
+
+            const surface = surfaceY(piece.x);
+            const radius = piece.size * 0.42;
+            if (piece.y + radius >= surface) {
+                const slope = (surfaceY(piece.x + 4) - surfaceY(piece.x - 4)) / 8;
+                const nx = -slope;
+                const ny = 1;
+                const nLen = Math.max(0.001, Math.hypot(nx, ny));
+                const normalX = nx / nLen;
+                const normalY = ny / nLen;
+                const dot = piece.vx * normalX + piece.vy * normalY;
+                piece.x -= normalX * Math.min(18, Math.max(0, piece.y + radius - surface));
+                piece.y = surface - radius;
+                if (dot > 0) {
+                    piece.vx = (piece.vx - (1 + piece.restitution) * dot * normalX) * (1 - piece.friction * 0.52);
+                    piece.vy = (piece.vy - (1 + piece.restitution) * dot * normalY) * piece.restitution;
+                    piece.spin += (piece.vx * 0.012) / Math.max(0.2, piece.mass);
+                }
+
+                const speed = Math.hypot(piece.vx, piece.vy);
+                if (speed < 26 && Math.abs(piece.spin) < 0.9) {
+                    piece.settled = true;
+                    piece.vx = 0;
+                    piece.vy = 0;
+                    piece.spin = 0;
+                }
+            }
+        }
+
+        renderDestructionPiece(piece, now);
+        survivors.push(piece);
+    }
+
+    activeDestructionPieces = survivors;
+    endSpawnBatch();
+}
+
+function renderDestructionPiece(piece, now) {
+    const age = Math.max(0, (now - piece.born) / 1000);
+    const fade = clamp(1 - age / Math.max(0.1, piece.lifetime), 0.18, 1);
+    const shade = 0.54 + seededUnit(piece.seed, Math.floor(age * 5)) * 0.12;
+    spawnParticle(piece.x, piece.y, piece.vx * 0.015, piece.vy * 0.015, piece.r * shade, piece.g * shade, piece.b * shade, 0.5 * fade, piece.size * 0.78, 0.085, kinds.debris);
+
+    if (!reducedMotion && now - piece.lastSmoke > (piece.settled ? 210 : 90)) {
+        piece.lastSmoke = now;
+        spawnParticle(piece.x, piece.y - piece.size * 0.35, piece.wind * 0.48, -18 - seededUnit(piece.seed, Math.floor(age * 9)) * 26, 0.2, 0.18, 0.15, piece.settled ? 0.18 : 0.26, piece.size * (piece.settled ? 1.2 : 0.8), piece.settled ? 1.3 : 0.75, kinds.smoke);
+    }
+}
+
+function destructionPieceLimit(isReducedMotion, tier) {
+    if (isReducedMotion) return 8;
+    const normalizedTier = normalized(tier);
+    if (normalizedTier === "low") return 8;
+    if (normalizedTier === "balanced") return 14;
+    return 24;
 }
 
 function emitAmbient(dt, now) {
@@ -2085,6 +2279,14 @@ function nonNegativeNumber(value, fallback) {
 
 function randomBetween(min, max) {
     return min + Math.random() * (max - min);
+}
+
+function seededUnit(seed, salt) {
+    let value = Math.imul((Number(seed) | 0) ^ Math.imul((Number(salt) | 0) + 0x9e3779b9, 0x85ebca6b), 0xc2b2ae35);
+    value ^= value >>> 16;
+    value = Math.imul(value, 0x7feb352d);
+    value ^= value >>> 15;
+    return ((value >>> 0) & 0x00ffffff) / 16777215;
 }
 
 function clamp(value, min, max) {
