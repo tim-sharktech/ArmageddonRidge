@@ -580,7 +580,8 @@ public partial class Home
             _playerHurt,
             _cpuHurt,
             _playerShieldHit,
-            _cpuShieldHit);
+            _cpuShieldHit,
+            BuildingPayload(_state.CivilianStructures));
     }
 
     private void ResetRenderCache()
@@ -627,6 +628,30 @@ public partial class Home
         };
         var intensity = 0.34f + ((Math.Abs(HashCode.Combine(state.RandomSeed, state.RoundNumber, state.Wind)) % 36) / 100f);
         return new RenderWeather(type, intensity);
+    }
+
+    private static RenderBuilding[] BuildingPayload(IReadOnlyList<CivilianStructure> buildings)
+    {
+        var payload = new RenderBuilding[buildings.Count];
+        for (var i = 0; i < buildings.Count; i++)
+        {
+            var building = buildings[i];
+            payload[i] = new RenderBuilding(
+                building.Id,
+                building.Position.X,
+                building.Position.Y,
+                building.Width,
+                building.Height,
+                building.Health,
+                building.MaxHealth,
+                building.DamageFraction,
+                building.IsCollapsed,
+                building.LastDamagedShot,
+                building.PenaltyValue,
+                building.Kind);
+        }
+
+        return payload;
     }
 
     private bool HasTracerRounds =>

@@ -184,7 +184,8 @@ internal static class RenderPayloadSanitizer
         Vector2? interceptPoint,
         string? ownerTankId,
         string? visualKind,
-        VisualPhysicsPayload? visualPhysics = null)
+        VisualPhysicsPayload? visualPhysics = null,
+        IReadOnlyList<CivilianImpactResult>? civilianImpacts = null)
     {
         var hasValidIntercept = intercepted
             && interceptPoint is { } point
@@ -196,7 +197,8 @@ internal static class RenderPayloadSanitizer
             hasValidIntercept ? interceptPoint!.Value.Y : null,
             ownerTankId,
             visualKind,
-            BuildVisualPhysicsPayload(visualPhysics));
+            BuildVisualPhysicsPayload(visualPhysics),
+            BuildCivilianImpactPayload(civilianImpacts ?? []));
     }
 
     public static VisualPhysicsInteropPayload BuildVisualPhysicsPayload(VisualPhysicsPayload? payload)
@@ -224,6 +226,34 @@ internal static class RenderPayloadSanitizer
         x = 0;
         y = 0;
         return false;
+    }
+
+    public static CivilianImpactInteropPayload[] BuildCivilianImpactPayload(IReadOnlyList<CivilianImpactResult> impacts)
+    {
+        var payload = new List<CivilianImpactInteropPayload>(impacts.Count);
+        for (var i = 0; i < impacts.Count; i++)
+        {
+            var impact = impacts[i];
+            if (!IsFinite(impact.Position.X, impact.Position.Y)
+                || !float.IsFinite(impact.Damage)
+                || !float.IsFinite(impact.HealthRemaining)
+                || string.IsNullOrWhiteSpace(impact.StructureId))
+            {
+                continue;
+            }
+
+            payload.Add(new CivilianImpactInteropPayload(
+                impact.StructureId,
+                impact.Position.X,
+                impact.Position.Y,
+                Math.Clamp(impact.Damage, 0, 500),
+                Math.Max(0, impact.HealthRemaining),
+                Math.Max(0, impact.Penalty),
+                impact.Collapsed,
+                impact.Kind));
+        }
+
+        return payload.ToArray();
     }
 
     private static float FiniteOrDefault(float value, float fallback) =>
@@ -432,7 +462,18 @@ internal sealed record ShotPlaybackOptionsPayload(
     float? interceptY,
     string? ownerTankId,
     string? visualKind,
-    VisualPhysicsInteropPayload visualPhysics);
+    VisualPhysicsInteropPayload visualPhysics,
+    CivilianImpactInteropPayload[] civilianImpacts);
+
+internal sealed record CivilianImpactInteropPayload(
+    string structureId,
+    float x,
+    float y,
+    float damage,
+    float healthRemaining,
+    int penalty,
+    bool collapsed,
+    string kind);
 
 internal sealed record VisualPhysicsInteropPayload(
     TerrainSlumpInteropPayload slump,

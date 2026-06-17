@@ -42,6 +42,63 @@ public sealed class GameEngineTests
     }
 
     [Fact]
+    public void NewMatchSeedsDeterministicCivilianStructuresAwayFromTanks()
+    {
+        var engine = CreateEngine();
+        var first = engine.NewMatch(new MatchSettings(TerrainSeed: 123, EnableShop: false));
+        var second = engine.NewMatch(new MatchSettings(TerrainSeed: 123, EnableShop: false));
+
+        Assert.NotEmpty(first.CivilianStructures);
+        Assert.Equal(first.CivilianStructures.Count, second.CivilianStructures.Count);
+        for (var i = 0; i < first.CivilianStructures.Count; i++)
+        {
+            Assert.Equal(first.CivilianStructures[i].Position, second.CivilianStructures[i].Position);
+            Assert.True(MathF.Abs(first.CivilianStructures[i].Position.X - first.PlayerTank.Position.X) > 100);
+            Assert.True(MathF.Abs(first.CivilianStructures[i].Position.X - first.CpuTank.Position.X) > 100);
+        }
+    }
+
+    [Fact]
+    public void DamagingCivilianStructureAppliesPenaltyAndShotPayload()
+    {
+        var engine = CreateEngine();
+        var settings = new MatchSettings(TerrainSeed: 123, EnableShop: false);
+        var state = engine.NewMatch(settings);
+        var heights = Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray();
+        state.Terrain.CopyFrom(new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights));
+        state.PlayerTank.Position = new Vector2(160, 620);
+        state.CpuTank.Position = new Vector2(300, 620);
+        state.CpuTank.MaxHealth = 500;
+        state.CpuTank.Health = 500;
+        state.CivilianStructures.Clear();
+        state.CivilianStructures.Add(new CivilianStructure
+        {
+            Id = "test-civ",
+            Position = new Vector2(300, 620),
+            Kind = "office",
+            Width = 60,
+            Height = 90,
+            MaxHealth = 100,
+            Health = 100,
+            PenaltyValue = 250
+        });
+        state.PlayerTank.AddWeapon(WeaponIds.DarkEagle, 1);
+        state.SelectedWeaponId = WeaponIds.DarkEagle;
+        var cashBefore = state.PlayerTank.Cash;
+        engine.StartBattle(state);
+
+        var result = engine.FireCurrentTurn(state, settings);
+
+        var impact = Assert.Single(result.CivilianImpacts!);
+        Assert.Equal("test-civ", impact.StructureId);
+        Assert.True(impact.Damage > 0);
+        Assert.True(state.CivilianStructures[0].Health < 100);
+        Assert.Equal(cashBefore - impact.Penalty, state.PlayerTank.Cash);
+        Assert.Equal(impact.Penalty, state.CivilianPenaltyByPlayer);
+        Assert.Contains(result.Events, e => e.Contains("civilian", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void NewMatchUsesFastPlaytestEconomyAndHealth()
     {
         var engine = CreateEngine();

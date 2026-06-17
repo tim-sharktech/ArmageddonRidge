@@ -73,7 +73,8 @@ public sealed record ShotResolution(
     ShotVisualKind VisualKind = ShotVisualKind.Ballistic,
     bool Intercepted = false,
     Vector2? InterceptPoint = null,
-    ArmageddonRidge.Core.Physics.VisualPhysicsPayload? VisualPhysics = null);
+    ArmageddonRidge.Core.Physics.VisualPhysicsPayload? VisualPhysics = null,
+    IReadOnlyList<CivilianImpactResult>? CivilianImpacts = null);
 
 /// <summary>
 /// Timing counters captured around simulation, terrain deformation, and CPU planning.

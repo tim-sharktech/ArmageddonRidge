@@ -189,7 +189,7 @@ public sealed class TankPoseService
         {
             var away = tank.Center - new Vector2(impulse.X, impulse.Y);
             var sign = away.X >= 0 ? 1f : -1f;
-            rock = sign * Math.Clamp(impulse.Intensity * 0.08f, 0f, 8f);
+            rock = sign * Math.Clamp(impulse.Intensity * 0.12f, 0f, 12f);
         }
 
         var recoil = Vector2.Zero;
@@ -197,8 +197,8 @@ public sealed class TankPoseService
         if (string.Equals(tank.Id, firingTankId, StringComparison.OrdinalIgnoreCase) && !reducedMotion)
         {
             var radians = tank.TurretAngle * MathF.PI / 180f;
-            recoil = new Vector2(-MathF.Cos(radians), MathF.Sin(radians)) * 5.5f;
-            compression = Math.Min(1f, compression + 0.36f);
+            recoil = new Vector2(-MathF.Cos(radians), MathF.Sin(radians)) * 13.5f;
+            compression = Math.Min(1f, compression + 0.62f);
         }
 
         return new TankVisualPose(
@@ -301,7 +301,7 @@ public sealed class TerrainSlumpingService
 
         terrain.CopyFrom(new TerrainMask(terrain.Width, terrain.Height, after));
         var columns = new List<TerrainSlumpColumnPayload>(changed);
-        var duration = reducedMotion ? 120f : 420f;
+        var duration = reducedMotion ? 120f : 620f;
         for (var x = minX; x <= maxX; x++)
         {
             if (MathF.Abs(before[x] - after[x]) <= 0.001f) continue;
@@ -318,8 +318,8 @@ public sealed class TerrainSlumpingService
 
     private static int RelaxScalar(float[] heights, int minX, int maxX, int worldHeight)
     {
-        const float Threshold = 14f;
-        const float MaxTransfer = 5.5f;
+        const float Threshold = 12f;
+        const float MaxTransfer = 8.5f;
         var deltas = new float[heights.Length];
         var changed = 0;
         for (var x = minX; x < maxX; x++)
@@ -330,7 +330,7 @@ public sealed class TerrainSlumpingService
             var diff = right - left;
             var excess = MathF.Abs(diff) - Threshold;
             if (excess <= 0) continue;
-            var transfer = MathF.Min(MaxTransfer, excess * 0.22f);
+            var transfer = MathF.Min(MaxTransfer, excess * 0.32f);
             if (diff > 0)
             {
                 deltas[x] += transfer;

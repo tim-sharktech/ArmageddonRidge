@@ -19,7 +19,8 @@ public sealed record RenderScene(
     bool PlayerHurt = false,
     bool CpuHurt = false,
     bool PlayerShieldHit = false,
-    bool CpuShieldHit = false);
+    bool CpuShieldHit = false,
+    RenderBuilding[]? Buildings = null);
 
 public sealed record RenderWorld(int Width, int Height);
 
@@ -39,6 +40,20 @@ public sealed record RenderRadiationZone(
     int Turns,
     string VisualKind,
     bool Lava);
+
+public sealed record RenderBuilding(
+    string Id,
+    float X,
+    float Y,
+    float Width,
+    float Height,
+    float Health,
+    float MaxHealth,
+    float DamageFraction,
+    bool Collapsed,
+    int LastDamagedShot,
+    int PenaltyValue,
+    string Kind);
 
 public sealed record RenderTank(
     string Id,
