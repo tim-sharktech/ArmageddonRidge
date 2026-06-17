@@ -69,7 +69,8 @@ public sealed class ProjectileSimulator
         var speed = Math.Clamp(power, GameConstants.PowerMin, GameConstants.PowerMax) * 4.15f * weapon.ProjectileSpeedMultiplier;
         var vx = cos * speed;
         var vy = -sin * speed;
-        var windAcceleration = wind * weapon.WindInfluence * GameConstants.FixedDeltaTime;
+        var air = ProjectileAirProfile.For(weapon);
+        var windAcceleration = wind * weapon.WindInfluence * air.WindCoupling * GameConstants.FixedDeltaTime;
         var gravityAcceleration = GameConstants.Gravity * weapon.GravityInfluence * GameConstants.FixedDeltaTime;
 
         var opponentHitbox = TankHitbox(opponent);
@@ -85,8 +86,29 @@ public sealed class ProjectileSimulator
             if (captureTrail && step % 2 == 0)
                 trail!.Add(new Vector2(px, py));
 
-            var nextVx = vx + windAcceleration;
-            var nextVy = vy + gravityAcceleration;
+            var speedSquared = (vx * vx) + (vy * vy);
+            var speedLength = MathF.Sqrt(speedSquared);
+            var dragStep = air.Drag > 0 && speedLength > 0.001f
+                ? Math.Clamp(air.Drag * speedLength * GameConstants.FixedDeltaTime, 0f, 0.18f)
+                : 0f;
+            var thrustX = air.Thrust > 0 && speedLength > 0.001f
+                ? (vx / speedLength) * air.Thrust * GameConstants.FixedDeltaTime
+                : 0f;
+            var thrustY = air.Thrust > 0 && speedLength > 0.001f
+                ? (vy / speedLength) * air.Thrust * GameConstants.FixedDeltaTime
+                : 0f;
+            var nextVx = (vx * (1f - dragStep)) + windAcceleration + thrustX;
+            var nextVy = (vy * (1f - dragStep)) + gravityAcceleration + thrustY - (air.Lift * speedLength * GameConstants.FixedDeltaTime);
+            if (float.IsFinite(air.TerminalVelocity) && air.TerminalVelocity > 0)
+            {
+                var nextSpeed = MathF.Sqrt((nextVx * nextVx) + (nextVy * nextVy));
+                if (nextSpeed > air.TerminalVelocity)
+                {
+                    var scale = air.TerminalVelocity / nextSpeed;
+                    nextVx *= scale;
+                    nextVy *= scale;
+                }
+            }
             var nextX = px + (nextVx * GameConstants.FixedDeltaTime);
             var nextY = py + (nextVy * GameConstants.FixedDeltaTime);
 

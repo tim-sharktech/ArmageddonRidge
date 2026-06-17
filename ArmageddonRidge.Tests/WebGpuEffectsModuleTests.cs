@@ -187,6 +187,46 @@ public sealed class WebGpuEffectsModuleTests
     }
 
     [Fact]
+    public async Task WebGpuVisualPhysicsSanitizerDropsMalformedEntries()
+    {
+        var repoRoot = FindRepoRoot();
+        var modulePath = Path.GetFullPath(Path.Combine(repoRoot, "ArmageddonRidge.Client", "wwwroot", "js", "webGpuEffectsRenderer.js"));
+        var moduleUri = new Uri(modulePath).AbsoluteUri;
+        var script = $$"""
+            const effects = await import({{JsonSerializer.Serialize(moduleUri)}});
+            const payload = effects.sanitizeVisualPhysics({
+                slump: { columns: [{ x: 3, fromY: 60, toY: 70 }, { x: 4, fromY: Number.NaN, toY: 72 }] },
+                debris: [{ x: 10, y: 20, velocityX: '12' }, { x: Number.NaN, y: 20 }],
+                impacts: [{ x: 30, y: 40, material: 'Shield', shieldLike: true }],
+                lingering: [{ x: 50, y: 60, windX: -12, visualKind: 'Lava' }],
+                shockwaves: [{ x: 70, y: 80, radius: 90, intensity: 120 }, { x: 10, y: 20, radius: 0 }]
+            });
+
+            if (payload.slump.columns.length !== 1 || payload.debris.length !== 1 || payload.impacts.length !== 1 || payload.lingering.length !== 1 || payload.shockwaves.length !== 1) {
+                throw new Error(`Unexpected visual physics payload ${JSON.stringify(payload)}`);
+            }
+
+            if (!payload.impacts[0].shieldLike || payload.shockwaves[0].intensity !== 120) {
+                throw new Error(`Unexpected visual physics values ${JSON.stringify(payload)}`);
+            }
+
+            const shot = effects.sanitizeEffectPayload({
+                trail: [{ x: 1, y: 2 }],
+                civilianImpacts: [
+                    { x: 20, y: 30, damage: 80, penalty: 125, collapsed: true, kind: 'office' },
+                    { x: Number.NaN, y: 30, damage: 80 }
+                ]
+            });
+
+            if (shot.civilianImpacts.length !== 1 || !shot.civilianImpacts[0].collapsed || shot.civilianImpacts[0].penalty !== 125) {
+                throw new Error(`Unexpected civilian impact payload ${JSON.stringify(shot)}`);
+            }
+            """;
+
+        await RunNodeSmoke(repoRoot, script, "WebGPU visual physics sanitizer smoke");
+    }
+
+    [Fact]
     public async Task WebGpuFinalShotDestructionSanitizerClampsPayload()
     {
         var repoRoot = FindRepoRoot();

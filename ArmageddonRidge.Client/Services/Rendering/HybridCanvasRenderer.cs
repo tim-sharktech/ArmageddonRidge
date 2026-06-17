@@ -1,4 +1,3 @@
-using System.Numerics;
 using ArmageddonRidge.Core.Models;
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
@@ -69,13 +68,16 @@ public sealed class HybridCanvasRenderer(IJSRuntime js) : IGameRenderer
 
         var trailPayload = RenderPayloadSanitizer.BuildTrailPayload(resolution.Trail);
         var explosionPayload = RenderPayloadSanitizer.BuildExplosionPayload(resolution.Explosions, resolution.WeaponId);
+        var finalShotDestruction = RenderPayloadSanitizer.SanitizeFinalShotDestruction(
+            FinalShotDestructionBuilder.Build(scene, resolution, scene.Wind, false, playerDestroyed, cpuDestroyed));
         var playbackOptions = RenderPayloadSanitizer.BuildPlaybackOptions(
             resolution.Intercepted,
             resolution.InterceptPoint,
             resolution.OwnerTankId,
             resolution.VisualKind.ToString(),
-            RenderPayloadSanitizer.SanitizeFinalShotDestruction(
-                FinalShotDestructionBuilder.Build(scene, resolution, scene.Wind, false, playerDestroyed, cpuDestroyed)));
+            resolution.VisualPhysics,
+            resolution.CivilianImpacts,
+            finalShotDestruction);
 
         await _module.InvokeVoidAsync(
             "playShot",

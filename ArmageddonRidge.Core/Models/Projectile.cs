@@ -60,6 +60,7 @@ public sealed record ExplosionResult(
 /// <param name="VisualKind">Primary renderer hint for the shot.</param>
 /// <param name="Intercepted">Whether a defensive intercept cancelled the incoming shot.</param>
 /// <param name="InterceptPoint">World-space point used for the defensive intercept effect.</param>
+/// <param name="VisualPhysics">Deterministic renderer payload for visual-only physics reactions.</param>
 public sealed record ShotResolution(
     string WeaponId,
     string OwnerTankId,
@@ -71,7 +72,9 @@ public sealed record ShotResolution(
     PerformanceSample Performance,
     ShotVisualKind VisualKind = ShotVisualKind.Ballistic,
     bool Intercepted = false,
-    Vector2? InterceptPoint = null);
+    Vector2? InterceptPoint = null,
+    ArmageddonRidge.Core.Physics.VisualPhysicsPayload? VisualPhysics = null,
+    IReadOnlyList<CivilianImpactResult>? CivilianImpacts = null);
 
 /// <summary>
 /// Timing counters captured around simulation, terrain deformation, and CPU planning.
@@ -81,9 +84,13 @@ public sealed record ShotResolution(
 /// <param name="CpuPlanningMs">Elapsed CPU planning time in milliseconds.</param>
 /// <param name="TrailPoints">Number of sampled projectile trail points.</param>
 /// <param name="TerrainColumnsTouched">Number of terrain columns changed by the shot.</param>
+/// <param name="SlumpingColumns">Number of terrain columns changed by the relaxation pass.</param>
+/// <param name="VisualPhysicsPrepMs">Elapsed deterministic visual physics prep time in milliseconds.</param>
 public sealed record PerformanceSample(
     double SimulationMs,
     double TerrainMs,
     double CpuPlanningMs,
     int TrailPoints,
-    int TerrainColumnsTouched);
+    int TerrainColumnsTouched,
+    int SlumpingColumns = 0,
+    double VisualPhysicsPrepMs = 0);

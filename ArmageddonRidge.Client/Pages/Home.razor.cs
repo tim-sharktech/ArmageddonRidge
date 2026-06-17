@@ -5,6 +5,7 @@ using ArmageddonRidge.Core;
 using ArmageddonRidge.Core.Content;
 using ArmageddonRidge.Core.Game;
 using ArmageddonRidge.Core.Models;
+using ArmageddonRidge.Core.Physics;
 using ArmageddonRidge.Core.Terrain;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
@@ -132,6 +133,14 @@ public partial class Home
     private string RoundResult => _state?.PlayerTank.IsDestroyed == true ? "CPU wins the ridge" : "Player wins the ridge";
 
     private string LatestCombatEvent => _state?.EventLog.LastOrDefault() ?? string.Empty;
+
+    private string CivilianPenaltyText => _state is null
+        ? "$0"
+        : $"${Math.Max(0, _state.CivilianPenaltyByPlayer):N0}";
+
+    private string CivilianRiskText => _state is null || _state.CivilianStructures.Count == 0
+        ? "Clear"
+        : $"{_state.CivilianStructures.Count(static structure => !structure.IsCollapsed)} standing";
 
     private string SimdStatusLabel => _renderMode == RenderMode.Hybrid
         ? "N/A"
@@ -593,7 +602,9 @@ public partial class Home
             _playerHurt,
             _cpuHurt,
             _playerShieldHit,
-            _cpuShieldHit);
+            _cpuShieldHit,
+            BuildingPayload(_state.CivilianStructures),
+            _state.ShotsFired);
     }
 
     private void ResetRenderCache()
@@ -604,8 +615,10 @@ public partial class Home
 
     private void MarkTerrainChanged() => _terrainRevision++;
 
-    private static RenderTank TankDto(Tank tank, TerrainMask terrain) =>
-        new(
+    private static RenderTank TankDto(Tank tank, TerrainMask terrain)
+    {
+        var pose = new TankPoseService().BuildPose(tank, terrain, [], reducedMotion: true);
+        return new(
             tank.Id,
             tank.Position.X,
             tank.Position.Y,
@@ -614,7 +627,17 @@ public partial class Home
             MathF.Max(0, tank.Shield),
             tank.IsCpu,
             terrain.GetSurfaceY(tank.Position.X),
-            MathF.Max(0, tank.Position.Y - terrain.GetSurfaceY(tank.Position.X)));
+            MathF.Max(0, tank.Position.Y - terrain.GetSurfaceY(tank.Position.X)),
+            pose.HullAngleDegrees,
+            pose.VerticalOffset,
+            pose.LeftTreadY,
+            pose.RightTreadY,
+            pose.SuspensionCompression,
+            pose.RecoilX,
+            pose.RecoilY,
+            pose.RockAngleDegrees,
+            pose.ShadowSquash);
+    }
 
     private static RenderWeather WeatherDto(GameState state)
     {
@@ -628,6 +651,30 @@ public partial class Home
         };
         var intensity = 0.34f + ((Math.Abs(HashCode.Combine(state.RandomSeed, state.RoundNumber, state.Wind)) % 36) / 100f);
         return new RenderWeather(type, intensity);
+    }
+
+    private static RenderBuilding[] BuildingPayload(IReadOnlyList<CivilianStructure> buildings)
+    {
+        var payload = new RenderBuilding[buildings.Count];
+        for (var i = 0; i < buildings.Count; i++)
+        {
+            var building = buildings[i];
+            payload[i] = new RenderBuilding(
+                building.Id,
+                building.Position.X,
+                building.Position.Y,
+                building.Width,
+                building.Height,
+                building.Health,
+                building.MaxHealth,
+                building.DamageFraction,
+                building.IsCollapsed,
+                building.LastDamagedShot,
+                building.PenaltyValue,
+                building.Kind);
+        }
+
+        return payload;
     }
 
     private bool HasTracerRounds =>

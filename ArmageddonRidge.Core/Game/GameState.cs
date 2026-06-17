@@ -54,6 +54,11 @@ public sealed class GameState
     public List<RadiationZone> RadiationZones { get; } = [];
 
     /// <summary>
+    /// Damageable civilian structures that players should avoid hitting.
+    /// </summary>
+    public List<CivilianStructure> CivilianStructures { get; } = [];
+
+    /// <summary>
     /// Seed used for terrain and deterministic random decisions.
     /// </summary>
     public int RandomSeed { get; init; }
@@ -87,6 +92,16 @@ public sealed class GameState
     /// Accumulated blast damage credited to the CPU this round.
     /// </summary>
     public float DamageDealtByCpu { get; set; }
+
+    /// <summary>
+    /// Cash penalties charged to the player for damaging civilian structures this round.
+    /// </summary>
+    public int CivilianPenaltyByPlayer { get; set; }
+
+    /// <summary>
+    /// Cash penalties charged to the CPU for damaging civilian structures this round.
+    /// </summary>
+    public int CivilianPenaltyByCpu { get; set; }
 
     /// <summary>
     /// Most recent simulation and renderer-facing performance counters.

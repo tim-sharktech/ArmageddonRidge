@@ -93,6 +93,10 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
     const shotScene = prepareScene(scene);
     shotInProgress = true;
     const playbackOptions = options ?? {};
+    const visualPhysics = sanitizeVisualPhysics(playbackOptions.visualPhysics);
+    playbackOptions.visualPhysics = visualPhysics;
+    playbackOptions.civilianImpacts = sanitizeCivilianImpacts(playbackOptions.civilianImpacts);
+    visualPhysics.civilianImpacts = playbackOptions.civilianImpacts;
     let points = sanitizeRenderPoints(Array.isArray(trail) ? trail : Array.from(trail ?? []), 2);
     if (!points.length) {
         shotInProgress = false;
@@ -110,6 +114,7 @@ export async function playShot(scene, trail, explosions, screenShake, weaponId, 
 
     const finalDestruction = sanitizeCanvasDestruction(playbackOptions.finalShotDestruction ?? playbackOptions.FinalShotDestruction);
     const activeExplosions = Array.isArray(explosions) ? explosions : Array.from(explosions ?? []);
+    applyVisualTankPoses(shotScene, visualPhysics?.tankPoses ?? []);
     const stagedExplosions = [];
     const finalExplosions = [];
     let highImpactShake = false;
@@ -249,6 +254,168 @@ export function sanitizeRenderPoints(points, minCount = 0) {
     }
 
     return sanitized.length >= minCount ? sanitized : [];
+}
+
+export function sanitizeVisualPhysics(payload) {
+    if (!payload || typeof payload !== "object") {
+        return {
+            slump: { columns: [], durationMs: 0, reducedMotion: false },
+            tankPoses: [],
+            shockwaves: [],
+            debris: [],
+            impacts: [],
+            lingering: [],
+            simdEnabled: false
+        };
+    }
+
+    return {
+        slump: sanitizeSlump(payload.slump),
+        tankPoses: sanitizeTankPoses(payload.tankPoses),
+        shockwaves: sanitizeFiniteList(payload.shockwaves, item => {
+            const x = Number(item?.x);
+            const y = Number(item?.y);
+            const radius = Number(item?.radius);
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius) || radius <= 0) return null;
+            return {
+                x,
+                y,
+                radius: clamp(radius, 1, 3000),
+                intensity: clamp(Number(item?.intensity ?? 0), 0, 500),
+                directionX: Number(item?.directionX ?? 0),
+                directionY: Number(item?.directionY ?? -1),
+                terrainDampening: clamp01(Number(item?.terrainDampening ?? 1)),
+                visualKind: String(item?.visualKind ?? "")
+            };
+        }),
+        debris: sanitizeFiniteList(payload.debris, item => {
+            const x = Number(item?.x);
+            const y = Number(item?.y);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+            return {
+                x,
+                y,
+                velocityX: Number(item?.velocityX ?? 0),
+                velocityY: Number(item?.velocityY ?? 0),
+                friction: clamp01(Number(item?.friction ?? 0.6)),
+                bounceDamping: clamp01(Number(item?.bounceDamping ?? 0.35)),
+                material: String(item?.material ?? "Dirt")
+            };
+        }),
+        impacts: sanitizeFiniteList(payload.impacts, item => {
+            const x = Number(item?.x);
+            const y = Number(item?.y);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+            return {
+                x,
+                y,
+                directionX: Number(item?.directionX ?? 0),
+                directionY: Number(item?.directionY ?? -1),
+                intensity: clamp(Number(item?.intensity ?? 0), 0, 400),
+                material: String(item?.material ?? "Dirt"),
+                visualKind: String(item?.visualKind ?? ""),
+                shieldLike: Boolean(item?.shieldLike)
+            };
+        }),
+        lingering: sanitizeFiniteList(payload.lingering, item => {
+            const x = Number(item?.x);
+            const y = Number(item?.y);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+            return {
+                x,
+                y,
+                windX: Number(item?.windX ?? 0),
+                slopeX: Number(item?.slopeX ?? 0),
+                slopeY: Number(item?.slopeY ?? 0),
+                lifetime: clamp(Number(item?.lifetime ?? 0), 0, 12),
+                intensity: clamp(Number(item?.intensity ?? 0), 0, 4),
+                visualKind: String(item?.visualKind ?? "")
+            };
+        }),
+        simdEnabled: Boolean(payload.simdEnabled)
+    };
+}
+
+function sanitizeCivilianImpacts(impacts) {
+    return sanitizeFiniteList(impacts, item => {
+        const x = Number(item?.x);
+        const y = Number(item?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return {
+            structureId: String(item?.structureId ?? ""),
+            x,
+            y,
+            damage: clamp(Number(item?.damage ?? 0), 0, 500),
+            healthRemaining: Math.max(0, Number(item?.healthRemaining ?? 0)),
+            penalty: Math.max(0, Number(item?.penalty ?? 0)),
+            collapsed: Boolean(item?.collapsed),
+            kind: String(item?.kind ?? "apartment")
+        };
+    });
+}
+
+function sanitizeSlump(slump) {
+    const columns = sanitizeFiniteList(slump?.columns, item => {
+        const x = Number(item?.x);
+        const fromY = Number(item?.fromY);
+        const toY = Number(item?.toY);
+        if (!Number.isFinite(x) || !Number.isFinite(fromY) || !Number.isFinite(toY)) return null;
+        return {
+            x: Math.max(0, Math.round(x)),
+            fromY,
+            toY,
+            delayMs: Math.max(0, Number(item?.delayMs ?? 0)),
+            durationMs: Math.max(0, Number(item?.durationMs ?? 0))
+        };
+    });
+    return {
+        columns,
+        durationMs: Math.max(0, Number(slump?.durationMs ?? 0)),
+        reducedMotion: Boolean(slump?.reducedMotion)
+    };
+}
+
+function sanitizeTankPoses(poses) {
+    return sanitizeFiniteList(poses, item => {
+        const x = Number(item?.x);
+        const y = Number(item?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return {
+            tankId: String(item?.tankId ?? ""),
+            x,
+            y,
+            hullAngle: clamp(Number(item?.hullAngle ?? 0), -32, 32),
+            verticalOffset: clamp(Number(item?.verticalOffset ?? 0), -20, 20),
+            leftTreadY: Number(item?.leftTreadY ?? y),
+            rightTreadY: Number(item?.rightTreadY ?? y),
+            suspensionCompression: clamp01(Number(item?.suspensionCompression ?? 0)),
+            recoilX: clamp(Number(item?.recoilX ?? 0), -28, 28),
+            recoilY: clamp(Number(item?.recoilY ?? 0), -28, 28),
+            rockAngle: clamp(Number(item?.rockAngle ?? 0), -18, 18),
+            shadowSquash: clamp(Number(item?.shadowSquash ?? 1), 0.75, 1.3)
+        };
+    });
+}
+
+function sanitizeFiniteList(items, map) {
+    const source = Array.isArray(items) ? items : Array.from(items ?? []);
+    const result = [];
+    for (let i = 0; i < source.length; i++) {
+        const mapped = map(source[i]);
+        if (mapped) result.push(mapped);
+    }
+    return result;
+}
+
+function applyVisualTankPoses(scene, poses) {
+    if (!scene || !poses?.length) return;
+    for (const pose of poses) {
+        if (scene.player && pose.tankId === scene.player.id) {
+            scene.player = { ...scene.player, ...pose };
+        } else if (scene.cpu && pose.tankId === scene.cpu.id) {
+            scene.cpu = { ...scene.cpu, ...pose };
+        }
+    }
 }
 
 export function dispose() {
@@ -422,6 +589,7 @@ function drawScene(scene, offsetX, offsetY, options = {}) {
     drawSky(scene);
     drawWeather(scene, false);
     drawTerrain(scene.terrain ?? [], scene.world);
+    drawBuildings(scene.buildings ?? scene.Buildings ?? [], scene);
     drawRadiation(scene.radiation ?? []);
     drawTracerTrails(scene.tracerTrails ?? []);
     drawAimPreview(scene.previewTrail ?? []);
@@ -673,6 +841,16 @@ function terrainSurfaceTop(terrain, worldHeight) {
     return top;
 }
 
+function terrainSurfaceY(x) {
+    const terrain = cachedTerrain ?? lastScene?.terrain ?? [];
+    if (!terrain.length) {
+        return Number(lastScene?.world?.height ?? 700);
+    }
+
+    const index = clamp(Math.round(Number(x) || 0), 0, terrain.length - 1);
+    return Number(terrain[index] ?? lastScene?.world?.height ?? 700);
+}
+
 function drawTerrainStrata(terrain, worldHeight) {
     for (let y = 330; y < worldHeight; y += 28) {
         ctx.beginPath();
@@ -749,6 +927,195 @@ function drawTerrainGrass(terrain) {
         ctx.lineTo(x + lean, y - h);
     }
     ctx.stroke();
+}
+
+function drawBuildings(buildings, scene) {
+    const source = Array.isArray(buildings) ? buildings : Array.from(buildings ?? []);
+    if (!source.length) return;
+
+    ctx.save();
+    for (let i = 0; i < source.length; i++) {
+        const building = source[i];
+        const x = Number(building?.x ?? building?.X);
+        const y = Number(building?.y ?? building?.Y);
+        const width = clamp(Number(building?.width ?? building?.Width ?? 46), 24, 92);
+        const fullHeight = clamp(Number(building?.height ?? building?.Height ?? 80), 34, 150);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+        const damage = clamp01(Number(building?.damageFraction ?? building?.DamageFraction ?? 0));
+        const collapsed = Boolean(building?.collapsed ?? building?.Collapsed) || damage >= 0.98;
+        const kind = String(building?.kind ?? building?.Kind ?? "apartment").toLowerCase();
+        const penaltyValue = Math.max(0, Number(building?.penaltyValue ?? building?.PenaltyValue ?? 0));
+        const lastDamagedShot = Number(building?.lastDamagedShot ?? building?.LastDamagedShot ?? -1);
+        const shotIndex = Number(scene?.shotsFired ?? scene?.ShotsFired ?? scene?.round ?? 0);
+        const freshlyHit = Number.isFinite(lastDamagedShot) && lastDamagedShot >= 0 && lastDamagedShot >= shotIndex - 1;
+        drawBuildingSprite(x, y, width, fullHeight, damage, collapsed, kind, freshlyHit, penaltyValue, i);
+    }
+    ctx.restore();
+}
+
+function drawBuildingSprite(x, groundY, width, fullHeight, damage, collapsed, kind, freshlyHit, penaltyValue, seed) {
+    const standingHeight = collapsed ? fullHeight * 0.18 : fullHeight * (1 - damage * 0.46);
+    const left = x - width * 0.5;
+    const top = groundY - standingHeight;
+    const lean = collapsed ? 0 : (hash2d(seed, Math.round(x)) % 13 - 6) * damage * 0.18;
+    const palette = kind.includes("tower")
+        ? { wall: "#b9c0b3", side: "#707a72", dark: "#313735", light: "#e8e1c5" }
+        : kind.includes("office")
+            ? { wall: "#879ba5", side: "#536670", dark: "#1e2b31", light: "#cbe5ec" }
+            : kind.includes("row")
+                ? { wall: "#b08261", side: "#6d4738", dark: "#2e201c", light: "#f1c987" }
+                : { wall: "#a79c87", side: "#665f52", dark: "#292721", light: "#f1e1ad" };
+
+    ctx.save();
+    if (!collapsed) {
+        drawCivilianHazardMarker(x, groundY, width, fullHeight, damage, penaltyValue, freshlyHit);
+        ctx.translate(x, groundY);
+        ctx.rotate(lean * Math.PI / 180);
+        ctx.translate(-x, -groundY);
+        ctx.fillStyle = "rgba(5, 7, 8, 0.28)";
+        ctx.beginPath();
+        ctx.ellipse(x, groundY - 1, width * 0.58, 7 + damage * 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = palette.side;
+        ctx.fillRect(left + width * 0.14, top + 5, width * 0.86, standingHeight - 5);
+        ctx.fillStyle = palette.wall;
+        ctx.fillRect(left, top, width * 0.82, standingHeight);
+        ctx.fillStyle = "rgba(255, 246, 190, 0.18)";
+        ctx.fillRect(left + 4, top + 4, width * 0.18, standingHeight - 8);
+        ctx.strokeStyle = palette.dark;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(left, top, width * 0.82, standingHeight);
+        drawBuildingWindows(left, top, width, standingHeight, damage, palette, seed);
+        drawBuildingCracks(left, top, width, standingHeight, damage, palette.dark, seed);
+    }
+
+    if (collapsed) {
+        drawCollapsedBuildingRubble(x, groundY, width, fullHeight, palette, seed);
+    } else if (damage > 0.08) {
+        drawBuildingRubbleScatter(x, groundY, width, fullHeight, damage, palette, seed);
+    }
+
+    if (freshlyHit || damage > 0.45) {
+        drawCivilianWarning(x, top - 10, damage, collapsed);
+    }
+    ctx.restore();
+}
+
+function drawCivilianHazardMarker(x, groundY, width, fullHeight, damage, penaltyValue, freshlyHit) {
+    const pulse = freshlyHit ? 1 : 0.5 + Math.sin(performance.now() * 0.005 + x * 0.02) * 0.5;
+    const danger = clamp(0.34 + damage * 0.42 + (freshlyHit ? 0.22 : 0), 0.28, 0.82);
+    const label = penaltyValue > 0 ? `CIV $${Math.round(penaltyValue)}` : "CIV";
+
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 212, 93, ${0.04 + danger * 0.08})`;
+    ctx.strokeStyle = `rgba(255, 212, 93, ${0.2 + danger * 0.22 + pulse * 0.08})`;
+    ctx.lineWidth = freshlyHit ? 2.6 : 1.8;
+    ctx.setLineDash([5, 7]);
+    ctx.beginPath();
+    ctx.ellipse(x, groundY - fullHeight * 0.46, width * 0.74 + pulse * 2, fullHeight * 0.53 + pulse * 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const labelY = groundY - fullHeight - 20;
+    const labelWidth = Math.max(54, Math.min(82, label.length * 7.2));
+    ctx.fillStyle = `rgba(32, 22, 18, ${0.72 + damage * 0.14})`;
+    ctx.fillRect(x - labelWidth * 0.5, labelY - 12, labelWidth, 16);
+    ctx.strokeStyle = `rgba(255, 212, 93, ${0.34 + pulse * 0.16})`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - labelWidth * 0.5 + 0.5, labelY - 11.5, labelWidth - 1, 15);
+    ctx.fillStyle = "#ffd45d";
+    ctx.font = "800 9px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(label, x, labelY);
+    ctx.restore();
+}
+
+function drawBuildingWindows(left, top, width, height, damage, palette, seed) {
+    const cols = Math.max(2, Math.floor(width / 15));
+    const rows = Math.max(2, Math.floor(height / 18));
+    const cellW = width * 0.72 / cols;
+    for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+            const broken = (hash2d(seed + row * 13, col * 7) % 100) < damage * 84;
+            const wx = left + 7 + col * cellW;
+            const wy = top + 10 + row * 16;
+            ctx.fillStyle = broken ? palette.dark : palette.light;
+            ctx.fillRect(wx, wy, Math.max(4, cellW - 5), 7);
+            if (broken) {
+                ctx.strokeStyle = "rgba(240, 246, 255, 0.38)";
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(wx, wy + 1);
+                ctx.lineTo(wx + cellW - 5, wy + 6);
+                ctx.stroke();
+            }
+        }
+    }
+}
+
+function drawBuildingCracks(left, top, width, height, damage, color, seed) {
+    if (damage < 0.12) return;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.8;
+    const crackCount = Math.ceil(damage * 6);
+    for (let i = 0; i < crackCount; i++) {
+        const x = left + width * (0.18 + (hash2d(seed, i) % 64) / 100);
+        let y = top + height * ((hash2d(i, seed) % 72) / 100);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        for (let j = 0; j < 4; j++) {
+            y += 5 + (hash2d(seed + j, i) % 8);
+            ctx.lineTo(x + (hash2d(i + j, seed) % 15) - 7, y);
+        }
+        ctx.stroke();
+    }
+}
+
+function drawBuildingRubbleScatter(x, groundY, width, fullHeight, damage, palette, seed) {
+    const count = Math.ceil(damage * 18);
+    for (let i = 0; i < count; i++) {
+        const rx = x - width * 0.55 + (hash2d(seed + i, 17) % Math.max(1, Math.floor(width * 1.1)));
+        const ry = groundY - (hash2d(19, seed + i) % Math.max(8, Math.floor(fullHeight * 0.16)));
+        ctx.fillStyle = i % 2 ? palette.side : palette.dark;
+        ctx.fillRect(rx, ry, 4 + (i % 3), 3 + (i % 2));
+    }
+}
+
+function drawCollapsedBuildingRubble(x, groundY, width, fullHeight, palette, seed) {
+    ctx.fillStyle = "rgba(5, 7, 8, 0.3)";
+    ctx.beginPath();
+    ctx.ellipse(x, groundY, width * 0.78, 13, 0, 0, Math.PI * 2);
+    ctx.fill();
+    const count = Math.max(16, Math.floor(width * 0.8));
+    for (let i = 0; i < count; i++) {
+        const rx = x - width * 0.62 + (hash2d(seed + i, 23) % Math.floor(width * 1.24));
+        const ry = groundY - (hash2d(31, seed + i) % Math.max(12, Math.floor(fullHeight * 0.22)));
+        const size = 3 + (hash2d(i, seed + 4) % 8);
+        ctx.fillStyle = i % 4 === 0 ? palette.light : i % 2 === 0 ? palette.wall : palette.side;
+        ctx.fillRect(rx, ry, size, Math.max(3, size * 0.65));
+    }
+    ctx.strokeStyle = palette.dark;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x - width * 0.55, groundY - 6);
+    ctx.lineTo(x - width * 0.2, groundY - fullHeight * 0.22);
+    ctx.lineTo(x + width * 0.1, groundY - 8);
+    ctx.lineTo(x + width * 0.46, groundY - fullHeight * 0.16);
+    ctx.stroke();
+}
+
+function drawCivilianWarning(x, y, damage, collapsed) {
+    ctx.save();
+    ctx.globalAlpha = collapsed ? 0.92 : clamp(0.38 + damage * 0.6, 0.38, 0.9);
+    ctx.fillStyle = "rgba(32, 22, 18, 0.78)";
+    ctx.fillRect(x - 24, y - 12, 48, 16);
+    ctx.fillStyle = collapsed ? "#ff6961" : "#ffd45d";
+    ctx.font = "700 10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(collapsed ? "CIV HIT" : "AVOID", x, y);
+    ctx.restore();
 }
 
 function strokeTerrainTop(terrain, step, yOffset = 0) {
@@ -868,7 +1235,8 @@ function drawTank(tank, frameName, hurt = false, shieldHit = false, now = perfor
     ctx.globalAlpha = 0.3;
     ctx.fillStyle = "#05070a";
     ctx.beginPath();
-    ctx.ellipse(tank.x, tank.y - 4, 40, 9, 0, 0, Math.PI * 2);
+    const pose = tankPose(tank);
+    ctx.ellipse(tank.x + pose.recoilX * 0.35, tank.y - 4, 40 * pose.shadowSquash, 9 / pose.shadowSquash, pose.angleRadians * 0.18, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
@@ -877,6 +1245,7 @@ function drawTank(tank, frameName, hurt = false, shieldHit = false, now = perfor
     }
 
     drawTankSprite(tank, frameName);
+    drawTankRecoilShock(tank, now);
 
     if (shieldHit) {
         drawTankShieldHitGlimmer(tank, now);
@@ -1016,6 +1385,46 @@ function drawTankHitPulse(tank, now) {
     ctx.restore();
 }
 
+function drawTankRecoilShock(tank, now) {
+    const recoil = Math.hypot(Number(tank?.recoilX ?? 0), Number(tank?.recoilY ?? 0));
+    if (recoil < 1.5) return;
+
+    const pulse = 0.5 + Math.sin(now * 0.034) * 0.5;
+    const facing = tank.isCpu ? -1 : 1;
+    const angle = Number(tank?.angle ?? (tank?.isCpu ? 138 : 42)) * Math.PI / 180;
+    const muzzleX = tank.x + (facing * 18) + Math.cos(angle) * 48;
+    const muzzleY = tank.y - 44 - Math.sin(angle) * 48;
+
+    ctx.save();
+    ctx.strokeStyle = `rgba(255, 236, 170, ${0.72 * (1 - pulse * 0.34)})`;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(muzzleX, muzzleY, 14 + pulse * 24 + recoil * 0.95, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(255, 208, 116, ${0.34 * (1 - pulse * 0.4)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(muzzleX, muzzleY, 28 + pulse * 38 + recoil * 1.15, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = `rgba(35, 30, 24, ${0.48 * (1 - pulse * 0.2)})`;
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.ellipse(tank.x, tank.y - 20, 52 + recoil * 2.1, 20 + recoil * 0.72, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(20, 16, 12, ${0.34 * (1 - pulse * 0.18)})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(tank.x - facing * (28 + recoil * 0.2), tank.y - 4);
+    ctx.lineTo(tank.x - facing * (92 + recoil * 3.1), tank.y - 8 - pulse * 4);
+    ctx.stroke();
+    ctx.fillStyle = `rgba(116, 85, 48, ${0.32 * (1 - pulse * 0.35)})`;
+    ctx.beginPath();
+    ctx.ellipse(tank.x - facing * (48 + recoil * 1.5), tank.y - 3, 30 + recoil * 1.2, 7 + recoil * 0.18, -0.04 * facing, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
 function isTankHurt(tank, scene, side) {
     if (hasVisualFlag(tank?.hurt)
         || hasVisualFlag(tank?.isHurt)
@@ -1110,9 +1519,16 @@ function drawBurialCover(tank) {
 function drawTankSprite(tank, baseFrameName) {
     const frameName = tank.isCpu || baseFrameName === "cpuTank" ? "cpuHull" : "playerHull";
     const frame = spriteFrame(frameName);
+    const pose = tankPose(tank);
+    const baseX = tank.x + pose.recoilX;
+    const baseY = tank.y + pose.recoilY + pose.verticalOffset + pose.compression * 2;
 
     if (!frame) {
-        drawSprite(baseFrameName, tank.x - 48, tank.y - 52, 96, 48);
+        ctx.save();
+        ctx.translate(baseX, baseY - 24);
+        ctx.rotate(pose.angleRadians);
+        drawSprite(baseFrameName, -48, -28, 96, 48);
+        ctx.restore();
         drawTankBarrel(tank);
         return;
     }
@@ -1120,21 +1536,28 @@ function drawTankSprite(tank, baseFrameName) {
     const targetHeight = tank.isCpu ? 66 : 68;
     const targetWidth = targetHeight * frame.aspect;
     const anchorX = targetWidth * 0.5;
-    const footY = tank.y + 3;
-    drawSpriteFacing(frameName, tank.x - anchorX, footY - targetHeight, targetWidth, targetHeight, tank.isCpu ? -1 : 1);
+    const footY = baseY + 3;
+    ctx.save();
+    ctx.translate(baseX, footY - targetHeight * 0.48);
+    ctx.rotate(pose.angleRadians);
+    ctx.scale(1, 1 - pose.compression * 0.055);
+    drawSpriteFacing(frameName, -anchorX, -targetHeight * 0.52, targetWidth, targetHeight, tank.isCpu ? -1 : 1);
+    ctx.restore();
+    drawTreadCompression(tank, pose);
     drawTankBarrel(tank);
 }
 
 function drawTankBarrel(tank) {
     const facing = tank.isCpu ? -1 : 1;
-    const pivotX = tank.x + (facing * 18);
-    const pivotY = tank.y - 44;
+    const pose = tankPose(tank);
+    const pivotX = tank.x + pose.recoilX + (facing * 18);
+    const pivotY = tank.y + pose.recoilY + pose.verticalOffset - 44 + pose.compression * 3;
     const angle = Number(tank?.angle ?? (tank?.isCpu ? 138 : 42));
     const length = 48;
 
     ctx.save();
     ctx.translate(pivotX, pivotY);
-    ctx.rotate(-angle * Math.PI / 180);
+    ctx.rotate(pose.angleRadians - angle * Math.PI / 180);
 
     ctx.lineCap = "round";
     ctx.strokeStyle = "#070a0d";
@@ -1200,6 +1623,33 @@ function drawTurretCap(tank, x, y) {
     ctx.beginPath();
     ctx.ellipse(x, y, 15, 8, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
+}
+
+function tankPose(tank) {
+    const hull = Number(tank?.hullAngle ?? tank?.HullAngle ?? 0);
+    const rock = Number(tank?.rockAngle ?? tank?.RockAngle ?? 0);
+    return {
+        angleRadians: (hull + rock) * Math.PI / 180,
+        recoilX: Number(tank?.recoilX ?? 0),
+        recoilY: Number(tank?.recoilY ?? 0),
+        verticalOffset: Number(tank?.verticalOffset ?? 0),
+        compression: clamp01(Number(tank?.suspensionCompression ?? 0)),
+        shadowSquash: clamp(Number(tank?.shadowSquash ?? 1), 0.75, 1.3),
+        leftTreadY: Number(tank?.leftTreadY ?? tank?.y ?? 0),
+        rightTreadY: Number(tank?.rightTreadY ?? tank?.y ?? 0)
+    };
+}
+
+function drawTreadCompression(tank, pose) {
+    if (pose.compression <= 0.02) return;
+    ctx.save();
+    ctx.strokeStyle = `rgba(13, 16, 18, ${0.18 + pose.compression * 0.24})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(tank.x - 33, pose.leftTreadY + 1);
+    ctx.lineTo(tank.x + 33, pose.rightTreadY + 1);
+    ctx.stroke();
     ctx.restore();
 }
 
@@ -2149,10 +2599,12 @@ function drawTriggeredExplosions(explosions, visibleTrailCount, now, starts) {
 
 function animateExplosions(scene, explosions, screenShake, playbackOptions = {}) {
     const started = performance.now();
+    const visualPhysics = playbackOptions.visualPhysics ?? playbackOptions.VisualPhysics;
     const destruction = sanitizeCanvasDestruction(playbackOptions.finalShotDestruction ?? playbackOptions.FinalShotDestruction);
     const hiddenTankIds = destructionVictimIds(destruction);
     const intense = hasIntenseExplosion(explosions) || Boolean(destruction);
-    const duration = hasNuclearExplosion(explosions) ? 560 : 420;
+    const slumpDuration = Number(visualPhysics?.slump?.durationMs ?? 0);
+    const duration = Math.max(hasNuclearExplosion(explosions) ? 560 : 420, slumpDuration);
     const impactShakeLimit = destruction
         ? (destruction.mutual ? 3.6 : 2.7)
         : intense ? 7 : 3;
@@ -2166,9 +2618,14 @@ function animateExplosions(scene, explosions, screenShake, playbackOptions = {})
 
             const t = Math.min(1, (now - started) / duration);
             const strength = Math.sin(t * Math.PI);
-            const shake = screenShake ? strength * impactShakeLimit : 0;
+            const impulseShake = strongestVisualImpulse(visualPhysics);
+            const shakeClamp = visualPhysics?.slump?.reducedMotion ? 2.5 : intense ? 7 : 3;
+            const shake = screenShake
+                ? strength * Math.min(impactShakeLimit, Math.max(intense ? 4 : 2, Math.min(shakeClamp, impulseShake * 0.035)))
+                : 0;
             drawScene(scene, Math.sin(now * 0.09) * shake, Math.cos(now * 0.07) * shake * 0.45, { hiddenTankIds });
             drawExplosions(explosions, t);
+            drawVisualPhysicsEffects(visualPhysics, now - started, t);
             if (destruction) drawFinalShotDestructionFlash(destruction, t);
             if (t < 1) {
                 scheduleShotFrame(tick);
@@ -2461,13 +2918,6 @@ function canvasDebrisSpriteName(sprite) {
     }
 }
 
-function terrainSurfaceY(x) {
-    const terrain = lastScene?.terrain ?? cachedTerrain ?? [];
-    if (!terrain.length) return Number(lastScene?.world?.height ?? 700) * 0.72;
-    const index = Math.max(0, Math.min(terrain.length - 1, Math.round(x)));
-    return Number(terrain[index] ?? Number(lastScene?.world?.height ?? 700) * 0.72);
-}
-
 function destructionVictimIds(destruction) {
     const ids = new Set();
     if (!destruction?.pieces) return ids;
@@ -2537,6 +2987,171 @@ function drawExplosions(explosions, progress = 1) {
         drawExplosion(explosion, progress);
     }
     ctx.restore();
+}
+
+function strongestVisualImpulse(visualPhysics) {
+    const impulses = visualPhysics?.shockwaves ?? [];
+    let strongest = 0;
+    for (const impulse of impulses) {
+        strongest = Math.max(strongest, Number(impulse.intensity ?? 0) * Number(impulse.terrainDampening ?? 1));
+    }
+    return strongest;
+}
+
+function drawVisualPhysicsEffects(visualPhysics, elapsedMs, progress) {
+    if (!visualPhysics) return;
+
+    ctx.save();
+    setWorldTransform();
+    drawSlumpingColumns(visualPhysics.slump, elapsedMs);
+    drawMaterialImpacts(visualPhysics.impacts ?? [], progress);
+    drawCivilianImpactEffects(visualPhysics.civilianImpacts ?? [], elapsedMs, progress);
+    drawSettlingDebris(visualPhysics.debris ?? [], elapsedMs, visualPhysics.slump?.reducedMotion);
+    drawLingeringPhysics(visualPhysics.lingering ?? [], elapsedMs);
+    ctx.restore();
+}
+
+function drawSlumpingColumns(slump, elapsedMs) {
+    const columns = slump?.columns ?? [];
+    if (!columns.length) return;
+
+    const reduced = Boolean(slump?.reducedMotion);
+    ctx.save();
+    for (let i = 0; i < columns.length; i++) {
+        const column = columns[i];
+        const duration = Math.max(1, Number(column.durationMs ?? 1));
+        const local = clamp01((elapsedMs - Number(column.delayMs ?? 0)) / duration);
+        if (local <= 0) continue;
+        const x = Number(column.x);
+        const fromY = Number(column.fromY);
+        const toY = Number(column.toY);
+        const y = fromY + (toY - fromY) * (1 - Math.pow(1 - local, 2));
+        const height = Math.abs(toY - fromY);
+        if (height <= 0.5) continue;
+
+        ctx.fillStyle = `rgba(92, 67, 38, ${0.5 * (1 - local)})`;
+        ctx.fillRect(x - 3, Math.min(fromY, y) - 2, 7, Math.max(5, height + 4));
+        if (!reduced && i % 2 === 0) {
+            const dust = 1 - local;
+            ctx.fillStyle = `rgba(118, 92, 57, ${0.3 * dust})`;
+            ctx.beginPath();
+            ctx.ellipse(x, Math.min(fromY, toY) - 6 - local * 16, 9 + height * 0.18, 4 + height * 0.08, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(78, 56, 34, ${0.36 * dust})`;
+            ctx.fillRect(x - 4 + (i % 7), y - 8 - local * 24, 7, 5);
+        }
+
+        if (!reduced && i % 8 === 0) {
+            const dir = toY > fromY ? 1 : -1;
+            const dust = 1 - local;
+            ctx.strokeStyle = `rgba(64, 44, 25, ${0.28 * dust})`;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(x - 14, y - 3);
+            ctx.quadraticCurveTo(x, y + dir * height * 0.12, x + 16, toY - 2);
+            ctx.stroke();
+        }
+    }
+    ctx.restore();
+}
+
+function drawMaterialImpacts(impacts, progress) {
+    for (let i = 0; i < impacts.length; i++) {
+        const impact = impacts[i];
+        const material = String(impact.material ?? "").toLowerCase();
+        const shield = Boolean(impact.shieldLike) || material.includes("shield") || material.includes("energy");
+        const count = shield ? 8 : material.includes("metal") ? 10 : material.includes("lava") || material.includes("fire") ? 12 : 9;
+        const fade = Math.max(0, 1 - progress);
+        ctx.lineWidth = shield ? 2 : 1.7;
+        ctx.strokeStyle = shield
+            ? `rgba(134, 224, 255, ${0.55 * fade})`
+            : material.includes("metal")
+                ? `rgba(255, 232, 142, ${0.62 * fade})`
+                : material.includes("lava") || material.includes("fire")
+                    ? `rgba(255, 94, 28, ${0.6 * fade})`
+                    : `rgba(114, 80, 44, ${0.48 * fade})`;
+        for (let s = 0; s < count; s++) {
+            const angle = Math.PI * 2 * s / count + hash2d(i, s) * 0.001;
+            const inner = 4 + progress * 10;
+            const outer = 12 + progress * clamp(Number(impact.intensity ?? 20) * 0.18, 12, 42);
+            ctx.beginPath();
+            ctx.moveTo(impact.x + Math.cos(angle) * inner, impact.y + Math.sin(angle) * inner);
+            ctx.lineTo(impact.x + Math.cos(angle) * outer, impact.y + Math.sin(angle) * outer);
+            ctx.stroke();
+        }
+    }
+}
+
+function drawCivilianImpactEffects(impacts, elapsedMs, progress) {
+    if (!impacts.length) return;
+    const t = Math.min(1.3, elapsedMs / 1000);
+    for (let i = 0; i < impacts.length; i++) {
+        const impact = impacts[i];
+        const burst = Math.max(12, Math.min(42, impact.damage * 0.7));
+        const fade = Math.max(0, 1 - progress * 0.85);
+        ctx.fillStyle = `rgba(80, 64, 48, ${0.22 * fade})`;
+        ctx.beginPath();
+        ctx.ellipse(impact.x, impact.y - 8 - t * 14, burst * (0.8 + t), burst * 0.28, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        const count = impact.collapsed ? 22 : 12;
+        for (let p = 0; p < count; p++) {
+            const angle = -Math.PI + (Math.PI * 2 * p / count) + hash2d(i, p) * 0.0008;
+            const speed = (impact.collapsed ? 42 : 28) + (hash2d(p, i) % 48);
+            const x = impact.x + Math.cos(angle) * speed * t;
+            const y = Math.min(terrainSurfaceY(x) - 2, impact.y - 28 + Math.sin(angle) * speed * t + 120 * t * t);
+            ctx.fillStyle = p % 3 === 0 ? "rgba(226, 211, 164, 0.82)" : "rgba(92, 74, 58, 0.84)";
+            ctx.fillRect(x - 2, y - 2, 4 + (p % 3), 3 + (p % 2));
+        }
+
+        if (impact.penalty > 0) {
+            ctx.save();
+            ctx.globalAlpha = fade;
+            ctx.fillStyle = "rgba(34, 18, 16, 0.82)";
+            ctx.fillRect(impact.x - 30, impact.y - 96 - t * 16, 60, 18);
+            ctx.fillStyle = "#ffb45f";
+            ctx.font = "700 11px system-ui, sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(`-$${Math.round(impact.penalty)}`, impact.x, impact.y - 83 - t * 16);
+            ctx.restore();
+        }
+    }
+}
+
+function drawSettlingDebris(debris, elapsedMs, reducedMotion) {
+    const t = Math.min(1.8, elapsedMs / 1000);
+    const maxCount = reducedMotion ? Math.min(debris.length, 18) : debris.length;
+    for (let i = 0; i < maxCount; i++) {
+        const item = debris[i];
+        const friction = Number(item.friction ?? 0.6);
+        const vx = Number(item.velocityX ?? 0) * (1 - friction * 0.35);
+        const vy = Number(item.velocityY ?? 0) + 220 * t;
+        const x = Number(item.x ?? 0) + vx * t;
+        const y = Math.min(terrainSurfaceY(x) - 2, Number(item.y ?? 0) + vy * t * 0.35);
+        const material = String(item.material ?? "").toLowerCase();
+        ctx.fillStyle = material.includes("rock") ? "rgba(76, 65, 55, 0.72)" : "rgba(96, 70, 40, 0.74)";
+        ctx.fillRect(x - 2, y - 2, 4, 4);
+    }
+}
+
+function drawLingeringPhysics(lingering, elapsedMs) {
+    const seconds = elapsedMs / 1000;
+    for (let i = 0; i < lingering.length; i++) {
+        const effect = lingering[i];
+        const lifetime = Math.max(0.1, Number(effect.lifetime ?? 1));
+        const t = clamp01(seconds / lifetime);
+        const wind = Number(effect.windX ?? 0);
+        const slope = Number(effect.slopeX ?? 0);
+        const visual = String(effect.visualKind ?? "").toLowerCase();
+        const lava = visual.includes("lava") || visual.includes("fire");
+        const x = Number(effect.x ?? 0) + wind * t * (lava ? 0.4 : 1.8) + slope * t * 28;
+        const y = Number(effect.y ?? 0) - t * (lava ? 8 : 42);
+        const alpha = (1 - t) * (lava ? 0.22 : 0.18) * Number(effect.intensity ?? 1);
+        ctx.fillStyle = lava ? `rgba(255, 82, 24, ${alpha})` : `rgba(54, 48, 40, ${alpha})`;
+        ctx.beginPath();
+        ctx.ellipse(x, y, lava ? 22 + t * 12 : 30 + t * 26, lava ? 8 + t * 5 : 14 + t * 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
 }
 
 function drawExplosion(explosion, progress = 1) {

@@ -1,6 +1,7 @@
 using System.Numerics;
 using ArmageddonRidge.Client.Services.Rendering;
 using ArmageddonRidge.Core.Models;
+using ArmageddonRidge.Core.Physics;
 
 namespace ArmageddonRidge.Tests;
 
@@ -197,6 +198,35 @@ public sealed class HybridCanvasRenderPayloadTests
         Assert.Equal(3, zone.Turns);
         Assert.True(zone.Lava);
         Assert.Equal(ShotVisualKind.Lava.ToString(), zone.VisualKind);
+    }
+
+    [Fact]
+    public void VisualPhysicsPayloadDropsMalformedValuesBeforeInterop()
+    {
+        var payload = new VisualPhysicsPayload(
+            new TerrainSlumpPayload(
+                [
+                    new TerrainSlumpColumnPayload(3, 60, 70, 4, 120),
+                    new TerrainSlumpColumnPayload(4, float.NaN, 70, 4, 120)
+                ],
+                120,
+                false),
+            [new TankVisualPose("player", 10, 20, 6, 1, 19, 21, 0.5f, -4, 0, 3, 1.1f)],
+            [new ShockwaveImpulsePayload(30, 40, 90, 120, 0, -1, 0.8f, "Ballistic")],
+            [new DebrisSettlingPayload(50, 60, 12, -20, 0.6f, 0.4f, "Dirt")],
+            [new ImpactParticlePayload(70, 80, 0, -1, 90, "Metal", "Ballistic", false)],
+            [new LingeringEffectPayload(90, 100, 12, 0.2f, 0.1f, 4, 1, "Lava")],
+            true);
+
+        var interop = RenderPayloadSanitizer.BuildVisualPhysicsPayload(payload);
+
+        Assert.Single(interop.slump.columns);
+        Assert.Single(interop.tankPoses);
+        Assert.Single(interop.shockwaves);
+        Assert.Single(interop.debris);
+        Assert.Single(interop.impacts);
+        Assert.Single(interop.lingering);
+        Assert.True(interop.simdEnabled);
     }
 }
 

@@ -17,8 +17,10 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
 {
     private readonly TerrainGenerator _terrainGenerator = new();
     private readonly TerrainDeformer _terrainDeformer = new();
+    private readonly TerrainSlumpingService _terrainSlumping = new();
     private readonly ProjectileSimulator _projectileSimulator = new();
     private readonly ExplosionService _explosionService = new();
+    private readonly VisualPhysicsPayloadService _visualPhysics = new();
 
     /// <summary>
     /// Gets the weapon catalog used by this engine.
@@ -68,6 +70,7 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         };
 
         state.Wind = NextWind(state);
+        SeedCivilianStructures(state, terrain, seed);
         state.EventLog.Add($"Seed {seed}. The ridge wakes up.");
         state.EventLog.Add($"Rival channel: {cpuProfile.DisplayName}.");
         return state;
@@ -97,12 +100,16 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         state.Phase = settings.EnableShop ? GamePhase.Shop : GamePhase.Battle;
         state.CurrentTurn = TurnOwner.Player;
         state.RadiationZones.Clear();
+        state.CivilianStructures.Clear();
         state.ShotsFired = 0;
         state.DamageDealtByCpu = 0;
         state.DamageDealtByPlayer = 0;
+        state.CivilianPenaltyByCpu = 0;
+        state.CivilianPenaltyByPlayer = 0;
         state.Terrain.CopyFrom(terrain);
         PlaceTank(state.PlayerTank, terrain, 150);
         PlaceTank(state.CpuTank, terrain, GameConstants.WorldWidth - 150);
+        SeedCivilianStructures(state, terrain, seed);
         state.PlayerTank.Health = Math.Min(state.PlayerTank.Health + 15, state.PlayerTank.MaxHealth);
         SetTankHealth(state.CpuTank, CpuHealthFor(settings.Difficulty));
         state.CpuTank.Shield = settings.Difficulty >= Difficulty.Veteran ? 50 + (state.RoundNumber * 5) : 0;
@@ -149,6 +156,7 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         var owner = state.CurrentTurn == TurnOwner.Player ? state.PlayerTank : state.CpuTank;
         var opponent = state.CurrentTurn == TurnOwner.Player ? state.CpuTank : state.PlayerTank;
         var weaponId = state.CurrentTurn == TurnOwner.Player ? state.SelectedWeaponId : WeaponIds.PeaShell;
+        var shotWind = state.Wind;
         var taunt = string.Empty;
 
         if (state.CurrentTurn == TurnOwner.Cpu)
@@ -193,6 +201,17 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
             touched = ResolveExplosions(state, owner, opponent, weapon, simulation.Explosions, resolvedExplosions);
         }
 
+        TerrainSlumpPayload slumpPayload;
+        if (touched > 0 && !intercepted)
+        {
+            slumpPayload = _terrainSlumping.Relax(state.Terrain, resolvedExplosions);
+            touched += slumpPayload.Columns.Length;
+        }
+        else
+        {
+            slumpPayload = new TerrainSlumpPayload([], 0, false);
+        }
+
         terrainWatch.Stop();
 
         var events = new List<string>();
@@ -208,6 +227,24 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         {
             events.Add("Patriot Battery intercepted the incoming shot.");
             state.EventLog.Add(events[^1]);
+        }
+
+        var civilianImpacts = ResolveCivilianImpacts(state, owner, resolvedExplosions);
+        if (civilianImpacts.Count > 0)
+        {
+            var penalty = 0;
+            var collapsed = 0;
+            for (var i = 0; i < civilianImpacts.Count; i++)
+            {
+                penalty += civilianImpacts[i].Penalty;
+                if (civilianImpacts[i].Collapsed) collapsed++;
+            }
+
+            var message = collapsed > 0
+                ? $"{owner.Name} hit civilian structures. Penalty ${penalty}; {collapsed} collapsed."
+                : $"{owner.Name} hit civilian structures. Penalty ${penalty}.";
+            events.Add(message);
+            state.EventLog.Add(message);
         }
 
         var playerBeforeSettle = state.PlayerTank.Position.Y;
@@ -255,9 +292,31 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
             state.EventLog.Add(events[^1]);
         }
 
-        var perf = new PerformanceSample(simulationWatch.Elapsed.TotalMilliseconds, terrainWatch.Elapsed.TotalMilliseconds, cpuPlanningMs, simulation.Trail.Count, touched);
+        var visualWatch = Stopwatch.StartNew();
+        var visualKind = VisualKindFor(weapon);
+        var visualPhysics = _visualPhysics.Build(
+            state.Terrain,
+            state.PlayerTank,
+            state.CpuTank,
+            resolvedExplosions,
+            weapon.Id,
+            owner.Id,
+            visualKind,
+            shotWind,
+            slumpPayload,
+            false);
+        visualWatch.Stop();
+
+        var perf = new PerformanceSample(
+            simulationWatch.Elapsed.TotalMilliseconds,
+            terrainWatch.Elapsed.TotalMilliseconds,
+            cpuPlanningMs,
+            simulation.Trail.Count,
+            touched,
+            slumpPayload.Columns.Length,
+            visualWatch.Elapsed.TotalMilliseconds);
         state.LastPerformance = perf;
-        return new ShotResolution(weapon.Id, owner.Id, simulation.Trail, resolvedExplosions, events, winner is not null, winner, perf, VisualKindFor(weapon), intercepted, interceptPoint);
+        return new ShotResolution(weapon.Id, owner.Id, simulation.Trail, resolvedExplosions, events, winner is not null, winner, perf, visualKind, intercepted, interceptPoint, visualPhysics, civilianImpacts);
     }
 
     /// <summary>
@@ -581,6 +640,89 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         }
 
         return touched;
+    }
+
+    private static IReadOnlyList<CivilianImpactResult> ResolveCivilianImpacts(GameState state, Tank owner, IReadOnlyList<ExplosionResult> explosions)
+    {
+        if (state.CivilianStructures.Count == 0 || explosions.Count == 0) return [];
+
+        var impacts = new List<CivilianImpactResult>();
+        for (var e = 0; e < explosions.Count; e++)
+        {
+            var explosion = explosions[e];
+            var radius = MathF.Max(explosion.DamageRadius, explosion.TerrainRadius * 0.85f);
+            if (radius <= 0 || !float.IsFinite(radius) || !float.IsFinite(explosion.Center.X) || !float.IsFinite(explosion.Center.Y))
+                continue;
+
+            for (var i = 0; i < state.CivilianStructures.Count; i++)
+            {
+                var structure = state.CivilianStructures[i];
+                if (structure.IsCollapsed) continue;
+
+                var closestX = Math.Clamp(explosion.Center.X, structure.Position.X - structure.Width * 0.5f, structure.Position.X + structure.Width * 0.5f);
+                var closestY = Math.Clamp(explosion.Center.Y, structure.Position.Y - structure.Height, structure.Position.Y);
+                var distance = Vector2.Distance(explosion.Center, new Vector2(closestX, closestY));
+                if (distance > radius) continue;
+
+                var normalized = Math.Clamp(1f - distance / radius, 0.15f, 1f);
+                var damage = Math.Clamp((explosion.DamageRadius * 0.42f + explosion.TerrainRadius * 0.28f) * normalized, 6f, structure.MaxHealth);
+                var wasIntact = structure.Health >= structure.MaxHealth - 0.001f;
+                structure.Health = Math.Max(0, structure.Health - damage);
+                structure.LastDamagedShot = state.ShotsFired;
+                var penalty = wasIntact
+                    ? structure.PenaltyValue
+                    : Math.Max(25, (int)MathF.Round(structure.PenaltyValue * 0.35f * normalized));
+
+                owner.Cash = Math.Max(0, owner.Cash - penalty);
+                if (owner.IsCpu) state.CivilianPenaltyByCpu += penalty;
+                else state.CivilianPenaltyByPlayer += penalty;
+
+                impacts.Add(new CivilianImpactResult(
+                    structure.Id,
+                    structure.Position,
+                    damage,
+                    structure.Health,
+                    penalty,
+                    structure.IsCollapsed,
+                    structure.Kind));
+            }
+        }
+
+        return impacts;
+    }
+
+    private static void SeedCivilianStructures(GameState state, TerrainMask terrain, int seed)
+    {
+        var random = new Random(seed ^ 0x51C1A11);
+        var candidates = new[]
+        {
+            315f + random.NextSingle() * 45f,
+            505f + random.NextSingle() * 50f,
+            705f + random.NextSingle() * 50f,
+            875f + random.NextSingle() * 35f
+        };
+        var kinds = new[] { "apartment", "office", "water-tower", "rowhouse" };
+        for (var i = 0; i < candidates.Length; i++)
+        {
+            var x = Math.Clamp(candidates[i], 230f, terrain.Width - 230f);
+            if (MathF.Abs(x - state.PlayerTank.Position.X) < 115 || MathF.Abs(x - state.CpuTank.Position.X) < 115)
+                continue;
+
+            var width = i == 2 ? 42f : 48f + random.Next(0, 18);
+            var height = i == 2 ? 92f : 78f + random.Next(0, 44);
+            var maxHealth = 80f + height * 0.45f;
+            state.CivilianStructures.Add(new CivilianStructure
+            {
+                Id = $"civ-{state.RoundNumber}-{i}",
+                Position = new Vector2(x, terrain.GetSurfaceY(x)),
+                Kind = kinds[i % kinds.Length],
+                Width = width,
+                Height = height,
+                MaxHealth = maxHealth,
+                Health = maxHealth,
+                PenaltyValue = 125 + (int)MathF.Round(height * 2.3f)
+            });
+        }
     }
 
     private static Vector2 ClampToWorld(Vector2 point) => new(

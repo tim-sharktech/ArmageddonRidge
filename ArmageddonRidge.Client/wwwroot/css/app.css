@@ -499,12 +499,17 @@ select {
     line-height: 1;
 }
 
-.round-wind {
+.round-wind,
+.round-civ {
     display: block;
     color: #d7f7ff;
     font-size: 0.68rem;
     font-weight: 900;
     line-height: 1;
+}
+
+.round-civ {
+    color: #ffd45d;
 }
 
 .battle-hud.hurt-flash::before {
@@ -573,7 +578,7 @@ select {
     max-height: calc(100svh - 20px);
 }
 
-.hud-header, .shop-head, .readout-title, .wind-card {
+.hud-header, .shop-head, .readout-title, .wind-card, .civilian-card {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -585,7 +590,7 @@ select {
     gap: 8px;
 }
 
-.hud-header, .tank-readout, .wind-card, .controls-card, .modal-card, .shop-panel, .settings-drawer {
+.hud-header, .tank-readout, .wind-card, .civilian-card, .controls-card, .modal-card, .shop-panel, .settings-drawer {
     border: 1px solid #303a41;
     border-radius: 8px;
     background: var(--panel);
@@ -595,6 +600,7 @@ select {
 .battle-layout.is-battle .hud-header,
 .battle-layout.is-battle .tank-readout,
 .battle-layout.is-battle .wind-card,
+.battle-layout.is-battle .civilian-card,
 .battle-layout.is-battle .controls-card {
     border-color: rgba(255, 255, 255, 0.14);
     background: rgba(16, 22, 27, 0.58);
@@ -606,8 +612,23 @@ select {
     display: none;
 }
 
-.battle-layout.is-battle .wind-card {
+.battle-layout.is-battle .wind-card,
+.battle-layout.is-battle .civilian-card {
     padding: 10px 12px;
+}
+
+.civilian-card {
+    color: #fff8d9;
+}
+
+.civilian-card strong {
+    color: #ffd45d;
+    font-variant-numeric: tabular-nums;
+}
+
+.civilian-card small {
+    color: #9fb3bc;
+    font-weight: 800;
 }
 
 .battlefield-fps-button {

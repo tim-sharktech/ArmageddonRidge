@@ -19,7 +19,9 @@ public sealed record RenderScene(
     bool PlayerHurt = false,
     bool CpuHurt = false,
     bool PlayerShieldHit = false,
-    bool CpuShieldHit = false);
+    bool CpuShieldHit = false,
+    RenderBuilding[]? Buildings = null,
+    int ShotsFired = 0);
 
 public sealed record RenderWorld(int Width, int Height);
 
@@ -40,6 +42,20 @@ public sealed record RenderRadiationZone(
     string VisualKind,
     bool Lava);
 
+public sealed record RenderBuilding(
+    string Id,
+    float X,
+    float Y,
+    float Width,
+    float Height,
+    float Health,
+    float MaxHealth,
+    float DamageFraction,
+    bool Collapsed,
+    int LastDamagedShot,
+    int PenaltyValue,
+    string Kind);
+
 public sealed record RenderTank(
     string Id,
     float X,
@@ -49,7 +65,16 @@ public sealed record RenderTank(
     float Shield,
     bool IsCpu,
     float TerrainY,
-    float BuriedDepth);
+    float BuriedDepth,
+    float HullAngle = 0,
+    float VerticalOffset = 0,
+    float LeftTreadY = 0,
+    float RightTreadY = 0,
+    float SuspensionCompression = 0,
+    float RecoilX = 0,
+    float RecoilY = 0,
+    float RockAngle = 0,
+    float ShadowSquash = 1);
 
 public sealed record RenderFrame(RenderWorld World, IReadOnlyList<RenderCommand> Commands);
 

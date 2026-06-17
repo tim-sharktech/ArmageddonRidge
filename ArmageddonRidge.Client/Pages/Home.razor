@@ -70,6 +70,7 @@
                         <span>Round @_state.RoundNumber</span>
                         <strong>@VisiblePhase</strong>
                         <small class="round-wind">Wind @WindText</small>
+                        <small class="round-civ">Civ @CivilianPenaltyText</small>
                     </div>
 
                     <div class="@CpuVersusHealthCss">
@@ -174,6 +175,12 @@
                 <div class="wind-card">
                     <span>Wind</span>
                     <strong>@WindText</strong>
+                </div>
+
+                <div class="civilian-card">
+                    <span>Civilian risk</span>
+                    <strong>@CivilianPenaltyText</strong>
+                    <small>@CivilianRiskText</small>
                 </div>
 
                 @if (VisiblePhase == GamePhase.Shop)

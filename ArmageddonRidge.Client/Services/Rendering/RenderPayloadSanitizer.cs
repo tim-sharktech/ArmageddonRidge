@@ -1,5 +1,6 @@
 using System.Numerics;
 using ArmageddonRidge.Core.Models;
+using ArmageddonRidge.Core.Physics;
 
 namespace ArmageddonRidge.Client.Services.Rendering;
 
@@ -235,6 +236,8 @@ internal static class RenderPayloadSanitizer
         Vector2? interceptPoint,
         string? ownerTankId,
         string? visualKind,
+        VisualPhysicsPayload? visualPhysics = null,
+        IReadOnlyList<CivilianImpactResult>? civilianImpacts = null,
         FinalShotDestructionPayload? finalShotDestruction = null)
     {
         var hasValidIntercept = intercepted
@@ -247,7 +250,22 @@ internal static class RenderPayloadSanitizer
             hasValidIntercept ? interceptPoint!.Value.Y : null,
             ownerTankId,
             visualKind,
+            BuildVisualPhysicsPayload(visualPhysics),
+            BuildCivilianImpactPayload(civilianImpacts ?? []),
             finalShotDestruction);
+    }
+
+    public static VisualPhysicsInteropPayload BuildVisualPhysicsPayload(VisualPhysicsPayload? payload)
+    {
+        payload ??= VisualPhysicsPayload.Empty;
+        return new VisualPhysicsInteropPayload(
+            BuildSlumpPayload(payload.Slump),
+            BuildTankPosePayload(payload.TankPoses),
+            BuildShockwavePayload(payload.Shockwaves),
+            BuildDebrisPayload(payload.Debris),
+            BuildImpactPayload(payload.Impacts),
+            BuildLingeringPayload(payload.Lingering),
+            payload.SimdEnabled);
     }
 
     public static bool TryGetFinitePoint(Vector2? point, out float x, out float y)
@@ -264,6 +282,34 @@ internal static class RenderPayloadSanitizer
         return false;
     }
 
+    public static CivilianImpactInteropPayload[] BuildCivilianImpactPayload(IReadOnlyList<CivilianImpactResult> impacts)
+    {
+        var payload = new List<CivilianImpactInteropPayload>(impacts.Count);
+        for (var i = 0; i < impacts.Count; i++)
+        {
+            var impact = impacts[i];
+            if (!IsFinite(impact.Position.X, impact.Position.Y)
+                || !float.IsFinite(impact.Damage)
+                || !float.IsFinite(impact.HealthRemaining)
+                || string.IsNullOrWhiteSpace(impact.StructureId))
+            {
+                continue;
+            }
+
+            payload.Add(new CivilianImpactInteropPayload(
+                impact.StructureId,
+                impact.Position.X,
+                impact.Position.Y,
+                Math.Clamp(impact.Damage, 0, 500),
+                Math.Max(0, impact.HealthRemaining),
+                Math.Max(0, impact.Penalty),
+                impact.Collapsed,
+                impact.Kind));
+        }
+
+        return payload.ToArray();
+    }
+
     private static float FiniteOrDefault(float value, float fallback) =>
         float.IsFinite(value) ? value : fallback;
 
@@ -274,6 +320,146 @@ internal static class RenderPayloadSanitizer
         float.IsFinite(value) && value >= 0 ? value : fallback;
 
     private static bool IsFinite(float x, float y) => float.IsFinite(x) && float.IsFinite(y);
+
+    private static TerrainSlumpInteropPayload BuildSlumpPayload(TerrainSlumpPayload slump)
+    {
+        var columns = new List<TerrainSlumpColumnInteropPayload>(slump.Columns.Length);
+        for (var i = 0; i < slump.Columns.Length; i++)
+        {
+            var column = slump.Columns[i];
+            if (!IsFinite(column.FromY, column.ToY)
+                || !float.IsFinite(column.DelayMs)
+                || !float.IsFinite(column.DurationMs)
+                || column.X < 0)
+            {
+                continue;
+            }
+
+            columns.Add(new TerrainSlumpColumnInteropPayload(
+                column.X,
+                column.FromY,
+                column.ToY,
+                Math.Max(0, column.DelayMs),
+                Math.Max(0, column.DurationMs)));
+        }
+
+        return new TerrainSlumpInteropPayload(columns.ToArray(), Math.Max(0, FiniteOrDefault(slump.DurationMs, 0)), slump.ReducedMotion);
+    }
+
+    private static TankVisualPoseInteropPayload[] BuildTankPosePayload(IReadOnlyList<TankVisualPose> poses)
+    {
+        var payload = new List<TankVisualPoseInteropPayload>(poses.Count);
+        for (var i = 0; i < poses.Count; i++)
+        {
+            var pose = poses[i];
+            if (!IsFinite(pose.X, pose.Y)
+                || !float.IsFinite(pose.HullAngleDegrees)
+                || !float.IsFinite(pose.VerticalOffset)
+                || string.IsNullOrWhiteSpace(pose.TankId))
+            {
+                continue;
+            }
+
+            payload.Add(new TankVisualPoseInteropPayload(
+                pose.TankId,
+                pose.X,
+                pose.Y,
+                pose.HullAngleDegrees,
+                pose.VerticalOffset,
+                FiniteOrDefault(pose.LeftTreadY, pose.Y),
+                FiniteOrDefault(pose.RightTreadY, pose.Y),
+                Math.Clamp(FiniteOrDefault(pose.SuspensionCompression, 0), 0, 1),
+                FiniteOrDefault(pose.RecoilX, 0),
+                FiniteOrDefault(pose.RecoilY, 0),
+                Math.Clamp(FiniteOrDefault(pose.RockAngleDegrees, 0), -14, 14),
+                Math.Clamp(FiniteOrDefault(pose.ShadowSquash, 1), 0.75f, 1.3f)));
+        }
+
+        return payload.ToArray();
+    }
+
+    private static ShockwaveImpulseInteropPayload[] BuildShockwavePayload(IReadOnlyList<ShockwaveImpulsePayload> impulses)
+    {
+        var payload = new List<ShockwaveImpulseInteropPayload>(impulses.Count);
+        for (var i = 0; i < impulses.Count; i++)
+        {
+            var impulse = impulses[i];
+            if (!IsFinite(impulse.X, impulse.Y) || !float.IsFinite(impulse.Radius) || impulse.Radius <= 0) continue;
+            payload.Add(new ShockwaveImpulseInteropPayload(
+                impulse.X,
+                impulse.Y,
+                Math.Clamp(impulse.Radius, 1, 3000),
+                Math.Clamp(FiniteOrDefault(impulse.Intensity, 0), 0, 500),
+                FiniteOrDefault(impulse.DirectionX, 0),
+                FiniteOrDefault(impulse.DirectionY, -1),
+                Math.Clamp(FiniteOrDefault(impulse.TerrainDampening, 1), 0, 1),
+                impulse.VisualKind));
+        }
+
+        return payload.ToArray();
+    }
+
+    private static DebrisSettlingInteropPayload[] BuildDebrisPayload(IReadOnlyList<DebrisSettlingPayload> debris)
+    {
+        var payload = new List<DebrisSettlingInteropPayload>(debris.Count);
+        for (var i = 0; i < debris.Count; i++)
+        {
+            var item = debris[i];
+            if (!IsFinite(item.X, item.Y)) continue;
+            payload.Add(new DebrisSettlingInteropPayload(
+                item.X,
+                item.Y,
+                FiniteOrDefault(item.VelocityX, 0),
+                FiniteOrDefault(item.VelocityY, 0),
+                Math.Clamp(FiniteOrDefault(item.Friction, 0.6f), 0, 1),
+                Math.Clamp(FiniteOrDefault(item.BounceDamping, 0.35f), 0, 1),
+                item.Material));
+        }
+
+        return payload.ToArray();
+    }
+
+    private static ImpactParticleInteropPayload[] BuildImpactPayload(IReadOnlyList<ImpactParticlePayload> impacts)
+    {
+        var payload = new List<ImpactParticleInteropPayload>(impacts.Count);
+        for (var i = 0; i < impacts.Count; i++)
+        {
+            var impact = impacts[i];
+            if (!IsFinite(impact.X, impact.Y)) continue;
+            payload.Add(new ImpactParticleInteropPayload(
+                impact.X,
+                impact.Y,
+                FiniteOrDefault(impact.DirectionX, 0),
+                FiniteOrDefault(impact.DirectionY, -1),
+                Math.Clamp(FiniteOrDefault(impact.Intensity, 0), 0, 400),
+                impact.Material,
+                impact.VisualKind,
+                impact.ShieldLike));
+        }
+
+        return payload.ToArray();
+    }
+
+    private static LingeringEffectInteropPayload[] BuildLingeringPayload(IReadOnlyList<LingeringEffectPayload> lingering)
+    {
+        var payload = new List<LingeringEffectInteropPayload>(lingering.Count);
+        for (var i = 0; i < lingering.Count; i++)
+        {
+            var effect = lingering[i];
+            if (!IsFinite(effect.X, effect.Y)) continue;
+            payload.Add(new LingeringEffectInteropPayload(
+                effect.X,
+                effect.Y,
+                FiniteOrDefault(effect.WindX, 0),
+                FiniteOrDefault(effect.SlopeX, 0),
+                FiniteOrDefault(effect.SlopeY, 0),
+                Math.Clamp(FiniteOrDefault(effect.Lifetime, 0), 0, 12),
+                Math.Clamp(FiniteOrDefault(effect.Intensity, 0), 0, 4),
+                effect.VisualKind));
+        }
+
+        return payload.ToArray();
+    }
 
     private static bool AllFinite(params float[] values)
     {
@@ -340,4 +526,90 @@ internal sealed record ShotPlaybackOptionsPayload(
     float? interceptY,
     string? ownerTankId,
     string? visualKind,
+    VisualPhysicsInteropPayload visualPhysics,
+    CivilianImpactInteropPayload[] civilianImpacts,
     FinalShotDestructionPayload? finalShotDestruction = null);
+
+internal sealed record CivilianImpactInteropPayload(
+    string structureId,
+    float x,
+    float y,
+    float damage,
+    float healthRemaining,
+    int penalty,
+    bool collapsed,
+    string kind);
+
+internal sealed record VisualPhysicsInteropPayload(
+    TerrainSlumpInteropPayload slump,
+    TankVisualPoseInteropPayload[] tankPoses,
+    ShockwaveImpulseInteropPayload[] shockwaves,
+    DebrisSettlingInteropPayload[] debris,
+    ImpactParticleInteropPayload[] impacts,
+    LingeringEffectInteropPayload[] lingering,
+    bool simdEnabled);
+
+internal sealed record TerrainSlumpInteropPayload(
+    TerrainSlumpColumnInteropPayload[] columns,
+    float durationMs,
+    bool reducedMotion);
+
+internal sealed record TerrainSlumpColumnInteropPayload(
+    int x,
+    float fromY,
+    float toY,
+    float delayMs,
+    float durationMs);
+
+internal sealed record TankVisualPoseInteropPayload(
+    string tankId,
+    float x,
+    float y,
+    float hullAngle,
+    float verticalOffset,
+    float leftTreadY,
+    float rightTreadY,
+    float suspensionCompression,
+    float recoilX,
+    float recoilY,
+    float rockAngle,
+    float shadowSquash);
+
+internal sealed record ShockwaveImpulseInteropPayload(
+    float x,
+    float y,
+    float radius,
+    float intensity,
+    float directionX,
+    float directionY,
+    float terrainDampening,
+    string visualKind);
+
+internal sealed record DebrisSettlingInteropPayload(
+    float x,
+    float y,
+    float velocityX,
+    float velocityY,
+    float friction,
+    float bounceDamping,
+    string material);
+
+internal sealed record ImpactParticleInteropPayload(
+    float x,
+    float y,
+    float directionX,
+    float directionY,
+    float intensity,
+    string material,
+    string visualKind,
+    bool shieldLike);
+
+internal sealed record LingeringEffectInteropPayload(
+    float x,
+    float y,
+    float windX,
+    float slopeX,
+    float slopeY,
+    float lifetime,
+    float intensity,
+    string visualKind);

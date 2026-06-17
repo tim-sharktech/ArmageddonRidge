@@ -90,11 +90,11 @@ public sealed class HeadlessEdgeStartupTests
         Assert.True(result.FireButtonDisabledDuringShot, "The Fire button did not disable during player shot playback.");
         Assert.True(result.KeyboardControlsLockedDuringShot, "Keyboard aim controls changed while the shot/CPU turn had player controls locked.");
         Assert.True(result.PlayerTurnRecoveredAfterCpuCycle, "The browser did not recover to a player fireable state, or round-over state, after the CPU response.");
-        Assert.Empty(result.ConsoleErrors);
-        Assert.Empty(result.Exceptions);
-        Assert.Empty(result.NetworkFailures);
-        Assert.Empty(result.FailedResponses);
-        Assert.Empty(result.CdpErrors);
+        Assert.True(result.ConsoleErrors.Length == 0, $"Console errors:{Environment.NewLine}{string.Join(Environment.NewLine, result.ConsoleErrors)}");
+        Assert.True(result.Exceptions.Length == 0, $"Exceptions:{Environment.NewLine}{string.Join(Environment.NewLine, result.Exceptions)}");
+        Assert.True(result.NetworkFailures.Length == 0, $"Network failures:{Environment.NewLine}{string.Join(Environment.NewLine, result.NetworkFailures)}");
+        Assert.True(result.FailedResponses.Length == 0, $"Failed responses:{Environment.NewLine}{string.Join(Environment.NewLine, result.FailedResponses)}");
+        Assert.True(result.CdpErrors.Length == 0, $"CDP errors:{Environment.NewLine}{string.Join(Environment.NewLine, result.CdpErrors)}");
     }
 
     private static string FormatStartupDiagnostics(BrowserSmokeResult result)
