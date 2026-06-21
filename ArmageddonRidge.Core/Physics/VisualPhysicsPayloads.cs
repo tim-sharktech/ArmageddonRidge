@@ -101,6 +101,12 @@ public readonly record struct ProjectileAirProfile(
 {
     public static ProjectileAirProfile For(WeaponDefinition weapon)
     {
+        if (weapon.Id == WeaponIds.SplitterMirv)
+            return new ProjectileAirProfile(0.00045f, 0.64f, 0f, 0f, 820f);
+
+        if (weapon.Id == WeaponIds.Gbu57Mop)
+            return new ProjectileAirProfile(0.00035f, 0.12f, 0f, 0f, 900f);
+
         var baseProfile = weapon.BehaviorType switch
         {
             WeaponBehaviorType.Missile => new ProjectileAirProfile(0.018f, 0.34f, 15f, 0.02f, 720f),
@@ -111,7 +117,7 @@ public readonly record struct ProjectileAirProfile(
             _ => new ProjectileAirProfile(0.012f, 0.82f, 0f, 0f, 620f)
         };
 
-        if (weapon.Id == WeaponIds.HeavyShell || weapon.Id == WeaponIds.Gbu57Mop)
+        if (weapon.Id == WeaponIds.HeavyShell)
             return baseProfile with { Drag = MathF.Min(baseProfile.Drag, 0.008f), WindCoupling = MathF.Min(baseProfile.WindCoupling, 0.2f), TerminalVelocity = 780f };
 
         if (weapon.Id == WeaponIds.PeaShell)

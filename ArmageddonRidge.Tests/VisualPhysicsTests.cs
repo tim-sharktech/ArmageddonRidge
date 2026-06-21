@@ -148,6 +148,28 @@ public sealed class VisualPhysicsTests
         Assert.True(nuke.Trail.Count > 40);
     }
 
+    [Theory]
+    [InlineData(WeaponIds.SplitterMirv, 720, 900)]
+    [InlineData(WeaponIds.Gbu57Mop, 680, 850)]
+    public void HeavySpecialWeaponsPreserveReadableLongRange(string weaponId, float minimumX, float maximumX)
+    {
+        var terrain = new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray());
+        var player = Tank("player", 160, terrain, 42);
+        var cpu = Tank("cpu", 980, terrain, 138);
+        var weapon = new WeaponCatalog().Get(weaponId);
+        var simulator = new ProjectileSimulator();
+
+        var shot = simulator.Simulate(terrain, player, cpu, weapon, 42, 70, 0);
+
+        Assert.InRange(shot.ImpactPoint.X, minimumX, maximumX);
+        Assert.True(shot.Trail.Count > 70);
+        Assert.All(shot.Trail, point =>
+        {
+            Assert.True(float.IsFinite(point.X));
+            Assert.True(float.IsFinite(point.Y));
+        });
+    }
+
     [Fact]
     public void GameResolutionCarriesVisualPhysicsPayload()
     {
