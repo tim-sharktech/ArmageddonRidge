@@ -54,7 +54,9 @@ public sealed record RenderBuilding(
     bool Collapsed,
     int LastDamagedShot,
     int PenaltyValue,
-    string Kind);
+    string Kind,
+    float TiltDegrees = 0,
+    float SupportFraction = 1);
 
 public sealed record RenderTank(
     string Id,

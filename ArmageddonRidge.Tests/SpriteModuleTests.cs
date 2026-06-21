@@ -6,6 +6,26 @@ namespace ArmageddonRidge.Tests;
 public sealed class SpriteModuleTests
 {
     [Fact]
+    public void CivilianArchetypeSpriteSetsArePresent()
+    {
+        var repoRoot = FindRepoRoot();
+        var spriteRoot = Path.Combine(repoRoot, "ArmageddonRidge.Client", "wwwroot", "assets", "sprites");
+        var archetypes = new[] { "office", "apartment", "luxury" };
+        var states = new[] { "intact", "damaged", "rubble" };
+
+        foreach (var archetype in archetypes)
+        {
+            foreach (var state in states)
+            {
+                var path = Path.Combine(spriteRoot, $"civilian-{archetype}-{state}.png");
+                var file = new FileInfo(path);
+                Assert.True(file.Exists, $"Missing civilian sprite '{file.Name}'.");
+                Assert.True(file.Length > 1_000, $"Civilian sprite '{file.Name}' is unexpectedly small.");
+            }
+        }
+    }
+
+    [Fact]
     public async Task ExtraSpriteMetadataPreservesNaturalAspectRatio()
     {
         var repoRoot = FindRepoRoot();

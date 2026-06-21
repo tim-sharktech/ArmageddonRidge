@@ -70,7 +70,8 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         };
 
         state.Wind = NextWind(state);
-        SeedCivilianStructures(state, terrain, seed);
+        if (settings.EnableCivilianStructures)
+            SeedCivilianStructures(state, terrain, seed);
         state.EventLog.Add($"Seed {seed}. The ridge wakes up.");
         state.EventLog.Add($"Rival channel: {cpuProfile.DisplayName}.");
         return state;
@@ -109,14 +110,33 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         state.Terrain.CopyFrom(terrain);
         PlaceTank(state.PlayerTank, terrain, 150);
         PlaceTank(state.CpuTank, terrain, GameConstants.WorldWidth - 150);
-        SeedCivilianStructures(state, terrain, seed);
-        state.PlayerTank.Health = Math.Min(state.PlayerTank.Health + 15, state.PlayerTank.MaxHealth);
+        if (settings.EnableCivilianStructures)
+            SeedCivilianStructures(state, terrain, seed);
+        state.PlayerTank.Health = state.PlayerTank.MaxHealth;
         SetTankHealth(state.CpuTank, CpuHealthFor(settings.Difficulty));
         state.CpuTank.Shield = settings.Difficulty >= Difficulty.Veteran ? 50 + (state.RoundNumber * 5) : 0;
         state.CpuTank.Cash = CpuBudget(settings.Difficulty, state.RoundNumber);
         SeedCpuInventory(state.CpuTank, settings, state.RoundNumber);
         state.Wind = NextWind(state);
         state.EventLog.Add($"Round {state.RoundNumber}. New ridge. Same grudge.");
+    }
+
+    /// <summary>
+    /// Applies the civilian tower setting to an active match without changing turn flow.
+    /// </summary>
+    public void ApplyCivilianStructureSetting(GameState state, MatchSettings settings)
+    {
+        if (!settings.EnableCivilianStructures)
+        {
+            state.CivilianStructures.Clear();
+            state.CivilianPenaltyByCpu = 0;
+            state.CivilianPenaltyByPlayer = 0;
+            return;
+        }
+
+        if (state.CivilianStructures.Count > 0) return;
+        var roundSeed = state.RandomSeed + ((state.RoundNumber - 1) * 7919);
+        SeedCivilianStructures(state, state.Terrain, roundSeed);
     }
 
     /// <summary>
@@ -178,13 +198,16 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         var shotPower = Math.Clamp(power ?? 65, GameConstants.PowerMin, GameConstants.PowerMax);
 
         var simulationWatch = Stopwatch.StartNew();
-        var simulation = SimulateWeapon(state, owner, opponent, weapon, owner.TurretAngle, shotPower);
+        var simulation = SimulateWeapon(state, owner, opponent, weapon, owner.TurretAngle, shotPower, settings);
         simulationWatch.Stop();
 
         var intercepted = false;
         Vector2? interceptPoint = null;
         var terrainWatch = Stopwatch.StartNew();
         var resolvedExplosions = new List<ExplosionResult>(simulation.Explosions.Count);
+        var civilianTerrainBefore = settings.EnableCivilianStructures
+            ? CaptureCivilianTerrain(state.Terrain, state.CivilianStructures)
+            : [];
         int touched;
         if (owner.IsCpu
             && HasPatriotInterceptor(opponent)
@@ -229,7 +252,16 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
             state.EventLog.Add(events[^1]);
         }
 
-        var civilianImpacts = ResolveCivilianImpacts(state, owner, resolvedExplosions);
+        var civilianImpacts = settings.EnableCivilianStructures
+            ? ResolveCivilianImpacts(state, owner, resolvedExplosions).ToList()
+            : [];
+        if (settings.EnableCivilianStructures)
+        {
+            var impactedIds = civilianImpacts
+                .Select(static impact => impact.StructureId)
+                .ToHashSet(StringComparer.Ordinal);
+            civilianImpacts.AddRange(ResolveCivilianTerrainSupport(state, owner, impactedIds, civilianTerrainBefore));
+        }
         if (civilianImpacts.Count > 0)
         {
             var penalty = 0;
@@ -359,12 +391,13 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         if (weapon.BehaviorType is WeaponBehaviorType.Teleport or WeaponBehaviorType.Laser)
             return [];
 
+        var civilianStructures = settings.EnableCivilianStructures ? state.CivilianStructures : null;
         return weapon.Id == WeaponIds.DarkEagle
             ? SimulateGuidedDarkEagle(state.PlayerTank, state.CpuTank, weapon).Trail
-            : _projectileSimulator.Simulate(state.Terrain, state.PlayerTank, state.CpuTank, weapon, angle, power, state.Wind, 60 * 6).Trail;
+            : _projectileSimulator.Simulate(state.Terrain, state.PlayerTank, state.CpuTank, weapon, angle, power, state.Wind, 60 * 6, civilianStructures).Trail;
     }
 
-    private WeaponSimulation SimulateWeapon(GameState state, Tank owner, Tank opponent, WeaponDefinition weapon, float angle, int power)
+    private WeaponSimulation SimulateWeapon(GameState state, Tank owner, Tank opponent, WeaponDefinition weapon, float angle, int power, MatchSettings settings)
     {
         if (weapon.BehaviorType == WeaponBehaviorType.Teleport)
         {
@@ -380,7 +413,8 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         if (weapon.Id == WeaponIds.DarkEagle)
             return SimulateGuidedDarkEagle(owner, opponent, weapon);
 
-        var primary = _projectileSimulator.Simulate(state.Terrain, owner, opponent, weapon, angle, power, state.Wind);
+        var civilianStructures = settings.EnableCivilianStructures ? state.CivilianStructures : null;
+        var primary = _projectileSimulator.Simulate(state.Terrain, owner, opponent, weapon, angle, power, state.Wind, civilianStructures: civilianStructures);
         if (weapon.BehaviorType == WeaponBehaviorType.BunkerBuster)
             return SimulateBunkerBuster(primary, owner, weapon);
 
@@ -664,11 +698,21 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
                 var distance = Vector2.Distance(explosion.Center, new Vector2(closestX, closestY));
                 if (distance > radius) continue;
 
+                var physics = CivilianPhysicsFor(structure.Kind);
                 var normalized = Math.Clamp(1f - distance / radius, 0.15f, 1f);
-                var damage = Math.Clamp((explosion.DamageRadius * 0.42f + explosion.TerrainRadius * 0.28f) * normalized, 6f, structure.MaxHealth);
+                var damage = Math.Clamp(
+                    ((explosion.DamageRadius * 0.42f + explosion.TerrainRadius * 0.28f) * normalized) / physics.BlastResistance,
+                    6f,
+                    structure.MaxHealth);
                 var wasIntact = structure.Health >= structure.MaxHealth - 0.001f;
                 structure.Health = Math.Max(0, structure.Health - damage);
                 structure.LastDamagedShot = state.ShotsFired;
+                var impactLean = structure.Position.X >= explosion.Center.X ? 1f : -1f;
+                structure.TiltDegrees = Math.Clamp(
+                    structure.TiltDegrees + (impactLean * normalized * 12f * physics.LeanMultiplier),
+                    -34f,
+                    34f);
+                structure.SupportFraction = Math.Clamp(structure.SupportFraction - (normalized * 0.16f), 0f, 1f);
                 var penalty = wasIntact
                     ? structure.PenaltyValue
                     : Math.Max(25, (int)MathF.Round(structure.PenaltyValue * 0.35f * normalized));
@@ -691,6 +735,162 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
         return impacts;
     }
 
+    private static IReadOnlyList<CivilianImpactResult> ResolveCivilianTerrainSupport(
+        GameState state,
+        Tank owner,
+        ISet<string> alreadyImpacted,
+        IReadOnlyDictionary<string, CivilianTerrainSnapshot> terrainBefore)
+    {
+        if (state.CivilianStructures.Count == 0 || terrainBefore.Count == 0) return [];
+
+        var impacts = new List<CivilianImpactResult>();
+        for (var i = 0; i < state.CivilianStructures.Count; i++)
+        {
+            var structure = state.CivilianStructures[i];
+            if (!terrainBefore.TryGetValue(structure.Id, out var before)) continue;
+
+            var physics = CivilianPhysicsFor(structure.Kind);
+            var support = SampleCivilianSupport(state.Terrain, structure, before);
+            if (support.TerrainDrop <= 0.5f
+                && support.SupportFraction >= 0.999f
+                && MathF.Abs(support.SlopeDeltaDegrees) <= 0.5f)
+            {
+                continue;
+            }
+
+            structure.SupportFraction = MathF.Min(structure.SupportFraction, support.SupportFraction);
+            structure.TiltDegrees = Math.Clamp(
+                structure.TiltDegrees + (support.SlopeDeltaDegrees * physics.LeanMultiplier),
+                -34f,
+                34f);
+
+            if (structure.IsCollapsed)
+            {
+                structure.Position = new Vector2(
+                    structure.Position.X,
+                    Math.Clamp(structure.Position.Y + support.TerrainDrop, 0, state.Terrain.Height - 1));
+                continue;
+            }
+
+            var fallDistance = support.TerrainDrop;
+            if (fallDistance > 0.5f)
+            {
+                var settle = Math.Clamp(fallDistance * 0.72f, 0f, MathF.Max(18f, structure.Height * 0.62f));
+                structure.Position = new Vector2(structure.Position.X, Math.Clamp(structure.Position.Y + settle, 0, state.Terrain.Height - 1));
+            }
+
+            var supportDamage = MathF.Max(0, 0.72f - support.SupportFraction) * 72f * physics.SupportDamageMultiplier;
+            var fallDamage = MathF.Max(0, fallDistance - 5f) * 0.62f * physics.SupportDamageMultiplier;
+            var tiltDamage = MathF.Max(0, MathF.Abs(support.SlopeDeltaDegrees) - 8f) * 1.05f * physics.LeanMultiplier;
+            var damage = supportDamage + fallDamage + tiltDamage;
+            if (support.SupportFraction < physics.CollapseSupportFraction || fallDistance > structure.Height * physics.CollapseFallFraction)
+                damage = MathF.Max(damage, structure.Health);
+
+            if (damage < 5f) continue;
+
+            var damageApplied = MathF.Min(structure.Health, damage);
+            structure.Health = Math.Max(0, structure.Health - damageApplied);
+            structure.LastDamagedShot = state.ShotsFired;
+            if (alreadyImpacted.Contains(structure.Id)) continue;
+
+            var penalty = structure.IsCollapsed
+                ? Math.Max(60, (int)MathF.Round(structure.PenaltyValue * 0.45f))
+                : Math.Max(25, (int)MathF.Round(structure.PenaltyValue * Math.Clamp(damageApplied / MathF.Max(structure.MaxHealth, 1f), 0.16f, 0.55f)));
+
+            owner.Cash = Math.Max(0, owner.Cash - penalty);
+            if (owner.IsCpu) state.CivilianPenaltyByCpu += penalty;
+            else state.CivilianPenaltyByPlayer += penalty;
+
+            impacts.Add(new CivilianImpactResult(
+                structure.Id,
+                structure.Position,
+                damageApplied,
+                structure.Health,
+                penalty,
+                structure.IsCollapsed,
+                structure.Kind));
+        }
+
+        return impacts;
+    }
+
+    private static Dictionary<string, CivilianTerrainSnapshot> CaptureCivilianTerrain(
+        TerrainMask terrain,
+        IReadOnlyList<CivilianStructure> structures)
+    {
+        var snapshots = new Dictionary<string, CivilianTerrainSnapshot>(structures.Count, StringComparer.Ordinal);
+        for (var i = 0; i < structures.Count; i++)
+        {
+            var structure = structures[i];
+            snapshots[structure.Id] = CaptureCivilianTerrain(terrain, structure);
+        }
+
+        return snapshots;
+    }
+
+    private static CivilianTerrainSnapshot CaptureCivilianTerrain(TerrainMask terrain, CivilianStructure structure)
+    {
+        const int SampleCount = 9;
+        var halfWidth = MathF.Max(8f, structure.Width * 0.5f);
+        var samples = new float[SampleCount];
+        var total = 0f;
+        var leftTotal = 0f;
+        var rightTotal = 0f;
+        var leftCount = 0;
+        var rightCount = 0;
+
+        for (var i = 0; i < SampleCount; i++)
+        {
+            var t = SampleCount == 1 ? 0.5f : i / (float)(SampleCount - 1);
+            var x = structure.Position.X - halfWidth + (t * halfWidth * 2f);
+            var surfaceY = terrain.GetSurfaceY(x);
+            samples[i] = surfaceY;
+            total += surfaceY;
+            if (t < 0.5f)
+            {
+                leftTotal += surfaceY;
+                leftCount++;
+            }
+            else if (t > 0.5f)
+            {
+                rightTotal += surfaceY;
+                rightCount++;
+            }
+        }
+
+        var average = total / SampleCount;
+        var leftAverage = leftCount > 0 ? leftTotal / leftCount : average;
+        var rightAverage = rightCount > 0 ? rightTotal / rightCount : average;
+        var slopeDegrees = MathF.Atan2(rightAverage - leftAverage, MathF.Max(1f, halfWidth * 2f)) * 180f / MathF.PI;
+        return new CivilianTerrainSnapshot(
+            samples,
+            Math.Clamp(average, 0, terrain.Height),
+            Math.Clamp(slopeDegrees, -34f, 34f));
+    }
+
+    private static CivilianSupportSample SampleCivilianSupport(
+        TerrainMask terrain,
+        CivilianStructure structure,
+        CivilianTerrainSnapshot before)
+    {
+        var current = CaptureCivilianTerrain(terrain, structure);
+        var sampleCount = Math.Min(before.SurfaceY.Length, current.SurfaceY.Length);
+        if (sampleCount == 0)
+            return new CivilianSupportSample(1f, 0f, 0f);
+
+        var supported = 0;
+        for (var i = 0; i < sampleCount; i++)
+        {
+            if (current.SurfaceY[i] <= before.SurfaceY[i] + 4f)
+                supported++;
+        }
+
+        return new CivilianSupportSample(
+            Math.Clamp(supported / (float)sampleCount, 0f, 1f),
+            MathF.Max(0, current.AverageSurfaceY - before.AverageSurfaceY),
+            Math.Clamp(current.SlopeDegrees - before.SlopeDegrees, -34f, 34f));
+    }
+
     private static void SeedCivilianStructures(GameState state, TerrainMask terrain, int seed)
     {
         var random = new Random(seed ^ 0x51C1A11);
@@ -701,29 +901,45 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
             705f + random.NextSingle() * 50f,
             875f + random.NextSingle() * 35f
         };
-        var kinds = new[] { "apartment", "office", "water-tower", "rowhouse" };
+        var kinds = new[] { "high-rise-apartment", "glass-office", "luxury-tower", "civic-tower" };
         for (var i = 0; i < candidates.Length; i++)
         {
             var x = Math.Clamp(candidates[i], 230f, terrain.Width - 230f);
             if (MathF.Abs(x - state.PlayerTank.Position.X) < 115 || MathF.Abs(x - state.CpuTank.Position.X) < 115)
                 continue;
 
-            var width = i == 2 ? 42f : 48f + random.Next(0, 18);
-            var height = i == 2 ? 92f : 78f + random.Next(0, 44);
-            var maxHealth = 80f + height * 0.45f;
+            var kind = kinds[i % kinds.Length];
+            var physics = CivilianPhysicsFor(kind);
+            var (width, height) = kind switch
+            {
+                "glass-office" => (52f + random.Next(0, 15), 104f + random.Next(0, 41)),
+                "high-rise-apartment" => (60f + random.Next(0, 17), 110f + random.Next(0, 41)),
+                "luxury-tower" => (50f + random.Next(0, 15), 118f + random.Next(0, 33)),
+                _ => (48f + random.Next(0, 15), 88f + random.Next(0, 39))
+            };
+            var maxHealth = 70f + height * physics.HealthPerHeight;
             state.CivilianStructures.Add(new CivilianStructure
             {
                 Id = $"civ-{state.RoundNumber}-{i}",
                 Position = new Vector2(x, terrain.GetSurfaceY(x)),
-                Kind = kinds[i % kinds.Length],
+                Kind = kind,
                 Width = width,
                 Height = height,
                 MaxHealth = maxHealth,
                 Health = maxHealth,
-                PenaltyValue = 125 + (int)MathF.Round(height * 2.3f)
+                PenaltyValue = 125 + (int)MathF.Round(height * 2.3f * physics.PenaltyMultiplier)
             });
         }
     }
+
+    private static CivilianBuildingPhysics CivilianPhysicsFor(string kind) =>
+        kind.ToLowerInvariant() switch
+        {
+            "glass-office" => new CivilianBuildingPhysics(0.78f, 0.86f, 0.92f, 0.14f, 0.64f, 0.43f, 1.05f),
+            "high-rise-apartment" => new CivilianBuildingPhysics(1.18f, 0.72f, 1.22f, 0.22f, 0.48f, 0.62f, 1f),
+            "luxury-tower" => new CivilianBuildingPhysics(0.92f, 1.22f, 1.05f, 0.2f, 0.52f, 0.5f, 1.4f),
+            _ => new CivilianBuildingPhysics(1f, 1f, 1f, 0.18f, 0.58f, 0.48f, 0.9f)
+        };
 
     private static Vector2 ClampToWorld(Vector2 point) => new(
         Math.Clamp(point.X, 0, GameConstants.WorldWidth - 1),
@@ -958,6 +1174,19 @@ public sealed class GameEngine(WeaponCatalog weapons, UpgradeCatalog upgrades)
 }
 
 internal sealed record WeaponSimulation(IReadOnlyList<Vector2> Trail, Vector2 ImpactPoint, IReadOnlyList<ExplosionResult> Explosions);
+
+internal readonly record struct CivilianTerrainSnapshot(float[] SurfaceY, float AverageSurfaceY, float SlopeDegrees);
+
+internal readonly record struct CivilianSupportSample(float SupportFraction, float TerrainDrop, float SlopeDeltaDegrees);
+
+internal readonly record struct CivilianBuildingPhysics(
+    float BlastResistance,
+    float LeanMultiplier,
+    float SupportDamageMultiplier,
+    float CollapseSupportFraction,
+    float CollapseFallFraction,
+    float HealthPerHeight,
+    float PenaltyMultiplier);
 
 internal readonly record struct CpuRivalProfile(string DisplayName, string TankName)
 {

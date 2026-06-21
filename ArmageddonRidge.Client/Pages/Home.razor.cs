@@ -32,6 +32,7 @@ public partial class Home
     private bool _reducedMotion;
     private bool _targetingComputerEnabledByDefault = true;
     private bool _enableNuclearWeapons = true;
+    private bool _enableCivilianStructures = true;
     private bool _webGpuEffectsEnabled = true;
     private RenderMode _renderMode = RenderMode.Hybrid;
     private float _sfxVolume = 0.9f;
@@ -190,6 +191,7 @@ public partial class Home
                 _reducedMotion = settings.ReducedMotion;
                 _targetingComputerEnabledByDefault = settings.TargetingComputerEnabledByDefault;
                 _enableNuclearWeapons = settings.EnableNuclearWeapons;
+                _enableCivilianStructures = settings.EnableCivilianStructures;
                 _webGpuEffectsEnabled = settings.WebGpuEffectsEnabled;
                 _renderMode = settings.RenderMode;
                 _startingCash = settings.StartingCash;
@@ -212,7 +214,8 @@ public partial class Home
             Difficulty: _difficulty,
             StartingCash: _startingCash,
             TerrainSeed: Random.Shared.Next(10_000, 99_999),
-            EnableNuclearWeapons: _enableNuclearWeapons);
+            EnableNuclearWeapons: _enableNuclearWeapons,
+            EnableCivilianStructures: _enableCivilianStructures);
         _state = Engine.NewMatch(_settings);
         ClearDamageFeedback();
         _tracerTrails.Clear();
@@ -671,7 +674,9 @@ public partial class Home
                 building.IsCollapsed,
                 building.LastDamagedShot,
                 building.PenaltyValue,
-                building.Kind);
+                building.Kind,
+                building.TiltDegrees,
+                building.SupportFraction);
         }
 
         return payload;
@@ -965,6 +970,19 @@ public partial class Home
         await PersistSaveAsync();
     }
 
+    private async Task HandleCivilianStructuresChangedAsync(ChangeEventArgs args)
+    {
+        _enableCivilianStructures = CheckedValue(args);
+        _settings = _settings with { EnableCivilianStructures = _enableCivilianStructures };
+        if (_state is not null)
+        {
+            Engine.ApplyCivilianStructureSetting(_state, _settings);
+            await RenderSceneCoreAsync(force: true);
+        }
+
+        await PersistSaveAsync();
+    }
+
     private async Task HandleWebGpuEffectsChangedAsync(ChangeEventArgs args)
     {
         _webGpuEffectsEnabled = CheckedValue(args);
@@ -1017,7 +1035,8 @@ public partial class Home
                 StartingCash: _startingCash,
                 TargetingComputerEnabledByDefault: _targetingComputerEnabledByDefault,
                 RenderMode: _renderMode,
-                WebGpuEffectsEnabled: _webGpuEffectsEnabled));
+                WebGpuEffectsEnabled: _webGpuEffectsEnabled,
+                EnableCivilianStructures: _enableCivilianStructures));
         await Storage.SetAsync("armageddon-ridge-save", save);
     }
 

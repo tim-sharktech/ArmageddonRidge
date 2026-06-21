@@ -20,9 +20,10 @@ public sealed class ProjectileSimulator
         float angleDegrees,
         int power,
         int wind,
-        int maxSteps = 60 * 9)
+        int maxSteps = 60 * 9,
+        IReadOnlyList<CivilianStructure>? civilianStructures = null)
     {
-        var result = SimulateCore(terrain, owner, opponent, weapon, angleDegrees, power, wind, maxSteps, captureTrail: true);
+        var result = SimulateCore(terrain, owner, opponent, weapon, angleDegrees, power, wind, maxSteps, captureTrail: true, civilianStructures: civilianStructures);
         return new ProjectileSimulation(
             result.Trail ?? [],
             result.ImpactPoint,
@@ -42,9 +43,10 @@ public sealed class ProjectileSimulator
         float angleDegrees,
         int power,
         int wind,
-        int maxSteps = 60 * 9)
+        int maxSteps = 60 * 9,
+        IReadOnlyList<CivilianStructure>? civilianStructures = null)
     {
-        var result = SimulateCore(terrain, owner, opponent, weapon, angleDegrees, power, wind, maxSteps, captureTrail: false);
+        var result = SimulateCore(terrain, owner, opponent, weapon, angleDegrees, power, wind, maxSteps, captureTrail: false, civilianStructures: civilianStructures);
         return new ProjectilePlanningSimulation(result.ImpactPoint, result.StopReason, result.NearestOpponentDistance, result.NearestOwnerDistance);
     }
 
@@ -57,7 +59,8 @@ public sealed class ProjectileSimulator
         int power,
         int wind,
         int maxSteps,
-        bool captureTrail)
+        bool captureTrail,
+        IReadOnlyList<CivilianStructure>? civilianStructures)
     {
         var angleRadians = angleDegrees * MathF.PI / 180f;
         var cos = MathF.Cos(angleRadians);
@@ -130,6 +133,9 @@ public sealed class ProjectileSimulator
                 return Finish(trail, captureTrail, ownerHit.X, ownerHit.Y, ProjectileStopReason.OwnerHit, nearestOpponentSquared, nearestOwnerSquared);
 
             if (!ownerSegmentTouches) ownerProjectileHasClearedTank = true;
+
+            if (SweptHitsStructure(px, py, nextX, nextY, civilianStructures, GameConstants.ProjectileCollisionRadius, out var structureHit))
+                return Finish(trail, captureTrail, structureHit.X, structureHit.Y, ProjectileStopReason.CivilianStructureHit, nearestOpponentSquared, nearestOwnerSquared);
 
             if (terrain.IsSolid(px, py)) return Finish(trail, captureTrail, px, py, ProjectileStopReason.TerrainHit, nearestOpponentSquared, nearestOwnerSquared);
 
@@ -233,6 +239,43 @@ public sealed class ProjectileSimulator
         return true;
     }
 
+    private static bool SweptHitsStructure(
+        float ax,
+        float ay,
+        float bx,
+        float by,
+        IReadOnlyList<CivilianStructure>? structures,
+        float padding,
+        out Vector2 hit)
+    {
+        hit = default;
+        if (structures is null || structures.Count == 0) return false;
+
+        var bestDistance = float.MaxValue;
+        var found = false;
+        for (var i = 0; i < structures.Count; i++)
+        {
+            var structure = structures[i];
+            if (structure.IsCollapsed) continue;
+
+            var halfWidth = Math.Max(4, structure.Width * 0.5f);
+            var hitbox = new Hitbox(
+                structure.Position.X - halfWidth,
+                structure.Position.X + halfWidth,
+                structure.Position.Y - Math.Max(8, structure.Height),
+                structure.Position.Y);
+            if (!SweptHitsTank(ax, ay, bx, by, hitbox, padding, out var candidate)) continue;
+
+            var distance = DistanceSquared(ax, ay, candidate.X, candidate.Y);
+            if (distance >= bestDistance) continue;
+            bestDistance = distance;
+            hit = candidate;
+            found = true;
+        }
+
+        return found;
+    }
+
     private static bool SweptHitsShield(float ax, float ay, float bx, float by, Tank tank, TerrainMask terrain, float padding, out Vector2 hit)
     {
         if (tank.Shield <= 0)
@@ -326,6 +369,7 @@ public enum ProjectileStopReason
     ShieldHit,
     TankHit,
     OwnerHit,
+    CivilianStructureHit,
     OutOfBounds,
     Expired
 }

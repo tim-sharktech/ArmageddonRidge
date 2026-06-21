@@ -259,6 +259,10 @@
                 <input type="checkbox" checked="@_enableNuclearWeapons" @onchange="HandleNuclearWeaponsChangedAsync" />
             </label>
             <label class="settings-row">
+                <span>Civilian towers</span>
+                <input type="checkbox" checked="@_enableCivilianStructures" @onchange="HandleCivilianStructuresChangedAsync" />
+            </label>
+            <label class="settings-row">
                 <span>Rendering</span>
                 <select value="@_renderMode" @onchange="HandleRenderModeChangedAsync">
                     @foreach (var mode in RenderModeOptions)

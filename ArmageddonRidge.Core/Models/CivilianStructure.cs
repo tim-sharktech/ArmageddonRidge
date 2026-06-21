@@ -53,6 +53,16 @@ public sealed class CivilianStructure
     public int PenaltyValue { get; init; } = 150;
 
     /// <summary>
+    /// Visual lean caused by uneven blast damage or terrain support loss.
+    /// </summary>
+    public float TiltDegrees { get; set; }
+
+    /// <summary>
+    /// Fraction of the footprint still supported by terrain near the original base.
+    /// </summary>
+    public float SupportFraction { get; set; } = 1;
+
+    /// <summary>
     /// Whether this structure has fully collapsed.
     /// </summary>
     public bool IsCollapsed => Health <= 0;
@@ -72,7 +82,9 @@ public sealed class CivilianStructure
         MaxHealth = MaxHealth,
         Health = Health,
         LastDamagedShot = LastDamagedShot,
-        PenaltyValue = PenaltyValue
+        PenaltyValue = PenaltyValue,
+        TiltDegrees = TiltDegrees,
+        SupportFraction = SupportFraction
     };
 }
 

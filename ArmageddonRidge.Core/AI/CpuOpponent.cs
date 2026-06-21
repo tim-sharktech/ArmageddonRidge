@@ -124,7 +124,7 @@ public sealed class CpuOpponent(WeaponCatalog weapons, ProjectileSimulator simul
     }
 
     private ProjectilePlanningSimulation SimulateCandidate(GameState state, WeaponDefinition weapon, int angle, int power) =>
-        _simulator.SimulateForPlanning(state.Terrain, state.CpuTank, state.PlayerTank, weapon, angle, power, state.Wind, 60 * 7);
+        _simulator.SimulateForPlanning(state.Terrain, state.CpuTank, state.PlayerTank, weapon, angle, power, state.Wind, 60 * 7, state.CivilianStructures);
 
     private CpuPlanningCandidate ScoreCandidate(GameState state, WeaponDefinition weapon, CpuDifficultyProfile profile, int angle, int power)
     {

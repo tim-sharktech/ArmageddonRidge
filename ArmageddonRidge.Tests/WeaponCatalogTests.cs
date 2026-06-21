@@ -25,8 +25,8 @@ public sealed class WeaponCatalogTests
 
         Assert.Equal("GBU-57 MOP", mop.DisplayName);
         Assert.Equal(WeaponBehaviorType.MultiStagePenetrator, mop.BehaviorType);
-        Assert.True(mop.ProjectileSpeedMultiplier < 0.9f);
-        Assert.True(mop.GravityInfluence > 1.4f);
+        Assert.InRange(mop.ProjectileSpeedMultiplier, 1f, 1.1f);
+        Assert.InRange(mop.GravityInfluence, 1.1f, 1.25f);
         Assert.True(mop.WindInfluence < 0.1f);
         Assert.True(mop.TerrainRadius > mop.BlastRadius);
     }

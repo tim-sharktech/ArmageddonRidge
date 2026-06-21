@@ -1655,9 +1655,20 @@ function spawnCivilianImpactBursts(impacts, wind) {
     const source = impacts ?? [];
     for (let i = 0; i < source.length; i++) {
         const impact = source[i];
+        const kind = String(impact.kind ?? "").toLowerCase();
+        const glass = kind.includes("glass") || kind.includes("office");
+        const apartment = kind.includes("apartment");
+        const luxury = kind.includes("luxury");
         const collapseBoost = impact.collapsed ? 1.45 : 1;
-        const count = scaledCount(Math.max(18, impact.damage * 0.42) * collapseBoost, 10, impact.collapsed ? 130 : 80);
-        const plume = scaledCount(Math.max(8, impact.damage * 0.14) * collapseBoost, 4, impact.collapsed ? 54 : 28);
+        const materialCount = glass ? 1.3 : apartment ? 1.12 : 1;
+        const dustScale = glass ? 0.72 : apartment ? 1.28 : luxury ? 0.92 : 1;
+        const count = scaledCount(Math.max(18, impact.damage * 0.42) * collapseBoost * materialCount, 10, impact.collapsed ? 150 : 96);
+        const plume = scaledCount(Math.max(8, impact.damage * 0.14) * collapseBoost * dustScale, 4, impact.collapsed ? 64 : 34);
+        const dustColor = glass
+            ? [0.34, 0.48, 0.52, impact.collapsed ? 0.28 : 0.18]
+            : luxury
+                ? [0.69, 0.62, 0.5, impact.collapsed ? 0.38 : 0.25]
+                : [0.56, 0.5, 0.42, impact.collapsed ? 0.38 : 0.26];
 
         spawnRadialEffect(
             impact.x,
@@ -1666,25 +1677,32 @@ function spawnCivilianImpactBursts(impacts, wind) {
             impact.collapsed ? 1.35 : 0.82,
             radialKinds.dust,
             impact.collapsed ? 0.74 : 0.48,
-            [0.56, 0.5, 0.42, impact.collapsed ? 0.38 : 0.26],
+            dustColor,
             { wind, softness: 0.42, aspect: 1.25, seed: randomBetween(0, 1000) });
 
         for (let p = 0; p < count; p++) {
             const angle = randomBetween(-Math.PI, Math.PI);
             const speed = randomBetween(30, impact.collapsed ? 230 : 150);
-            const warm = p % 5 === 0;
+            const accent = p % (glass ? 2 : luxury ? 4 : 5) === 0;
+            const color = glass
+                ? accent ? [0.76, 0.96, 1] : [0.18, 0.58, 0.72]
+                : luxury
+                    ? accent ? [0.92, 0.7, 0.3] : [0.76, 0.7, 0.6]
+                    : apartment
+                        ? accent ? [0.76, 0.67, 0.54] : [0.48, 0.43, 0.38]
+                        : accent ? [0.98, 0.72, 0.38] : [0.58, 0.5, 0.42];
             spawnParticle(
                 impact.x + randomBetween(-18, 18),
                 impact.y - randomBetween(10, 46),
                 Math.cos(angle) * speed + wind * randomBetween(0.2, 0.9),
                 Math.sin(angle) * speed - randomBetween(12, impact.collapsed ? 92 : 58),
-                warm ? 0.98 : 0.58,
-                warm ? 0.72 : 0.5,
-                warm ? 0.38 : 0.42,
+                color[0],
+                color[1],
+                color[2],
                 randomBetween(0.3, 0.68),
-                randomBetween(3, impact.collapsed ? 10 : 7),
+                randomBetween(glass ? 2 : 3, impact.collapsed ? 10 : 7),
                 randomBetween(0.5, impact.collapsed ? 1.8 : 1.2),
-                warm ? kinds.spark : kinds.debris);
+                glass || (luxury && accent) ? kinds.spark : kinds.debris);
         }
 
         for (let p = 0; p < plume; p++) {

@@ -99,7 +99,19 @@ export async function loadSprites(version) {
         loadExtraSprite("tankDebrisTurret", "assets/sprites/tank-debris-turret.png", version),
         loadExtraSprite("tankDebrisTread", "assets/sprites/tank-debris-tread.png", version),
         loadExtraSprite("tankDebrisBarrel", "assets/sprites/tank-debris-barrel.png", version),
-        loadExtraSprite("tankDebrisPlate", "assets/sprites/tank-debris-plate.png", version)
+        loadExtraSprite("tankDebrisPlate", "assets/sprites/tank-debris-plate.png", version),
+        loadExtraSprite("civilianTowerIntact", "assets/sprites/civilian-tower-intact.png", version),
+        loadExtraSprite("civilianTowerDamaged", "assets/sprites/civilian-tower-damaged.png", version),
+        loadExtraSprite("civilianTowerRubble", "assets/sprites/civilian-tower-rubble.png", version),
+        loadExtraSprite("civilianOfficeIntact", "assets/sprites/civilian-office-intact.png", version),
+        loadExtraSprite("civilianOfficeDamaged", "assets/sprites/civilian-office-damaged.png", version),
+        loadExtraSprite("civilianOfficeRubble", "assets/sprites/civilian-office-rubble.png", version),
+        loadExtraSprite("civilianApartmentIntact", "assets/sprites/civilian-apartment-intact.png", version),
+        loadExtraSprite("civilianApartmentDamaged", "assets/sprites/civilian-apartment-damaged.png", version),
+        loadExtraSprite("civilianApartmentRubble", "assets/sprites/civilian-apartment-rubble.png", version),
+        loadExtraSprite("civilianLuxuryIntact", "assets/sprites/civilian-luxury-intact.png", version),
+        loadExtraSprite("civilianLuxuryDamaged", "assets/sprites/civilian-luxury-damaged.png", version),
+        loadExtraSprite("civilianLuxuryRubble", "assets/sprites/civilian-luxury-rubble.png", version)
     ]);
 }
 

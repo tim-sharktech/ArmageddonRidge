@@ -77,6 +77,35 @@ public sealed class ProjectileSimulatorTests
     }
 
     [Fact]
+    public void SweptCollisionHitsCivilianStructureBeforeTank()
+    {
+        var heights = Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray();
+        var terrain = new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, heights);
+        var player = Tank("player", 160, terrain, 0);
+        var cpu = Tank("cpu", 430, terrain, 180);
+        player.Position = new Vector2(160, 620);
+        cpu.Position = new Vector2(430, 620);
+        var structure = new CivilianStructure
+        {
+            Id = "test-tower",
+            Position = new Vector2(280, 620),
+            Kind = "tower",
+            Width = 56,
+            Height = 118,
+            MaxHealth = 100,
+            Health = 100,
+            PenaltyValue = 180
+        };
+        var weapon = new WeaponCatalog().Get(WeaponIds.PeaShell);
+        var simulator = new ProjectileSimulator();
+
+        var result = simulator.Simulate(terrain, player, cpu, weapon, 0, 100, 0, maxSteps: 60, civilianStructures: [structure]);
+
+        Assert.Equal(ProjectileStopReason.CivilianStructureHit, result.StopReason);
+        Assert.InRange(result.ImpactPoint.X, structure.Position.X - (structure.Width / 2f) - GameConstants.ProjectileCollisionRadius, structure.Position.X);
+    }
+
+    [Fact]
     public void ShieldedTankProjectileImpactsBubbleBeforeHull()
     {
         var heights = Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray();

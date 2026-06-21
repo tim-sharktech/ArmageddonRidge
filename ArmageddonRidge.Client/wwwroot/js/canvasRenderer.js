@@ -33,7 +33,7 @@ const shotTimeoutIds = new Set();
 const activeShotCompletes = new Set();
 let lastAmbientRedraw = 0;
 let shotInProgress = false;
-const spriteManifestVersion = "2026-05-04-genesis-v7";
+const spriteManifestVersion = "2026-06-17-civilian-archetypes-v2";
 const dronePointCaches = Array.from({ length: 5 }, () => []);
 const ambientRedrawIntervalMs = 1000 / 30;
 const patriotInterceptDurationScale = 2.6;
@@ -946,66 +946,119 @@ function drawBuildings(buildings, scene) {
         const collapsed = Boolean(building?.collapsed ?? building?.Collapsed) || damage >= 0.98;
         const kind = String(building?.kind ?? building?.Kind ?? "apartment").toLowerCase();
         const penaltyValue = Math.max(0, Number(building?.penaltyValue ?? building?.PenaltyValue ?? 0));
+        const tiltDegrees = clamp(Number(building?.tiltDegrees ?? building?.TiltDegrees ?? 0), -40, 40);
+        const supportFraction = clamp01(Number(building?.supportFraction ?? building?.SupportFraction ?? 1));
         const lastDamagedShot = Number(building?.lastDamagedShot ?? building?.LastDamagedShot ?? -1);
         const shotIndex = Number(scene?.shotsFired ?? scene?.ShotsFired ?? scene?.round ?? 0);
         const freshlyHit = Number.isFinite(lastDamagedShot) && lastDamagedShot >= 0 && lastDamagedShot >= shotIndex - 1;
-        drawBuildingSprite(x, y, width, fullHeight, damage, collapsed, kind, freshlyHit, penaltyValue, i);
+        drawBuildingSprite(x, y, width, fullHeight, damage, collapsed, kind, freshlyHit, penaltyValue, i, tiltDegrees, supportFraction);
     }
     ctx.restore();
 }
 
-function drawBuildingSprite(x, groundY, width, fullHeight, damage, collapsed, kind, freshlyHit, penaltyValue, seed) {
+function drawBuildingSprite(x, groundY, width, fullHeight, damage, collapsed, kind, freshlyHit, penaltyValue, seed, tiltDegrees = 0, supportFraction = 1) {
     const standingHeight = collapsed ? fullHeight * 0.18 : fullHeight * (1 - damage * 0.46);
     const left = x - width * 0.5;
     const top = groundY - standingHeight;
-    const lean = collapsed ? 0 : (hash2d(seed, Math.round(x)) % 13 - 6) * damage * 0.18;
-    const palette = kind.includes("tower")
-        ? { wall: "#b9c0b3", side: "#707a72", dark: "#313735", light: "#e8e1c5" }
+    const supportStress = clamp01(1 - supportFraction);
+    const lean = collapsed
+        ? 0
+        : clamp(tiltDegrees + ((hash2d(seed, Math.round(x)) % 13 - 6) * (damage + supportStress) * 0.18), -36, 36);
+    const palette = kind.includes("luxury")
+        ? { wall: "#ddd2ba", side: "#817662", dark: "#292927", light: "#d6ab55" }
         : kind.includes("office")
-            ? { wall: "#879ba5", side: "#536670", dark: "#1e2b31", light: "#cbe5ec" }
-            : kind.includes("row")
-                ? { wall: "#b08261", side: "#6d4738", dark: "#2e201c", light: "#f1c987" }
-                : { wall: "#a79c87", side: "#665f52", dark: "#292721", light: "#f1e1ad" };
+            ? { wall: "#79b9cc", side: "#365f70", dark: "#172b34", light: "#bdefff" }
+            : kind.includes("apartment")
+                ? { wall: "#a79c87", side: "#665f52", dark: "#292721", light: "#f1e1ad" }
+                : kind.includes("tower")
+                    ? { wall: "#b9c0b3", side: "#707a72", dark: "#313735", light: "#e8e1c5" }
+                    : kind.includes("row")
+                        ? { wall: "#b08261", side: "#6d4738", dark: "#2e201c", light: "#f1c987" }
+                        : { wall: "#a79c87", side: "#665f52", dark: "#292721", light: "#f1e1ad" };
 
     ctx.save();
     if (!collapsed) {
-        drawCivilianHazardMarker(x, groundY, width, fullHeight, damage, penaltyValue, freshlyHit);
-        ctx.translate(x, groundY);
-        ctx.rotate(lean * Math.PI / 180);
-        ctx.translate(-x, -groundY);
+        drawCivilianHazardMarker(x, groundY, width, fullHeight, damage, freshlyHit, supportFraction);
         ctx.fillStyle = "rgba(5, 7, 8, 0.28)";
         ctx.beginPath();
-        ctx.ellipse(x, groundY - 1, width * 0.58, 7 + damage * 5, 0, 0, Math.PI * 2);
+        ctx.ellipse(x, groundY - 1, width * (0.58 + supportStress * 0.22), 7 + damage * 5 + supportStress * 5, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = palette.side;
-        ctx.fillRect(left + width * 0.14, top + 5, width * 0.86, standingHeight - 5);
-        ctx.fillStyle = palette.wall;
-        ctx.fillRect(left, top, width * 0.82, standingHeight);
-        ctx.fillStyle = "rgba(255, 246, 190, 0.18)";
-        ctx.fillRect(left + 4, top + 4, width * 0.18, standingHeight - 8);
-        ctx.strokeStyle = palette.dark;
-        ctx.lineWidth = 3;
-        ctx.strokeRect(left, top, width * 0.82, standingHeight);
-        drawBuildingWindows(left, top, width, standingHeight, damage, palette, seed);
-        drawBuildingCracks(left, top, width, standingHeight, damage, palette.dark, seed);
+        if (!drawGeneratedTowerSprite(x, groundY, width, standingHeight, damage, false, lean, supportFraction, kind)) {
+            ctx.translate(x, groundY);
+            ctx.rotate(lean * Math.PI / 180);
+            ctx.translate(-x, -groundY);
+            ctx.fillStyle = palette.side;
+            ctx.fillRect(left + width * 0.14, top + 5, width * 0.86, standingHeight - 5);
+            ctx.fillStyle = palette.wall;
+            ctx.fillRect(left, top, width * 0.82, standingHeight);
+            ctx.fillStyle = "rgba(255, 246, 190, 0.18)";
+            ctx.fillRect(left + 4, top + 4, width * 0.18, standingHeight - 8);
+            ctx.strokeStyle = palette.dark;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(left, top, width * 0.82, standingHeight);
+            drawBuildingWindows(left, top, width, standingHeight, damage, palette, seed);
+            drawBuildingCracks(left, top, width, standingHeight, damage + supportStress * 0.3, palette.dark, seed);
+        }
     }
 
     if (collapsed) {
-        drawCollapsedBuildingRubble(x, groundY, width, fullHeight, palette, seed);
+        if (!drawGeneratedTowerSprite(x, groundY, width, fullHeight, damage, true, 0, supportFraction, kind))
+            drawCollapsedBuildingRubble(x, groundY, width, fullHeight, palette, seed);
     } else if (damage > 0.08) {
-        drawBuildingRubbleScatter(x, groundY, width, fullHeight, damage, palette, seed);
+        drawBuildingRubbleScatter(x, groundY, width, fullHeight, damage, palette, seed, kind);
     }
 
-    if (freshlyHit || damage > 0.45) {
-        drawCivilianWarning(x, top - 10, damage, collapsed);
+    if (freshlyHit || damage > 0.45 || supportFraction < 0.72) {
+        drawCivilianWarning(x, top - 10, damage, collapsed, supportFraction);
     }
     ctx.restore();
 }
 
-function drawCivilianHazardMarker(x, groundY, width, fullHeight, damage, penaltyValue, freshlyHit) {
+function drawGeneratedTowerSprite(x, groundY, width, height, damage, collapsed, lean, supportFraction, kind) {
+    const supportStress = clamp01(1 - supportFraction);
+    const family = civilianSpriteFamily(kind);
+    const damagedThreshold = kind.includes("office") ? 0.12 : kind.includes("luxury") ? 0.18 : kind.includes("apartment") ? 0.27 : 0.23;
+    const spriteName = collapsed
+        ? `${family}Rubble`
+        : damage > damagedThreshold || supportStress > 0.22 || Math.abs(lean) > 5
+            ? `${family}Damaged`
+            : `${family}Intact`;
+    const frame = spriteFrame(spriteName);
+    if (!frame || !hasSprite(spriteName)) return false;
+
+    const spriteHeight = collapsed
+        ? clamp(height * (0.28 + damage * 0.08), 24, Math.max(28, height * 0.44))
+        : Math.max(34, height);
+    const spriteWidth = collapsed
+        ? Math.max(width * 1.85, spriteHeight * frame.aspect)
+        : Math.max(width * 0.92, spriteHeight * frame.aspect);
+
+    ctx.save();
+    if (collapsed) {
+        ctx.globalAlpha = 0.94;
+        drawExtraSprite(spriteName, x - spriteWidth * 0.5, groundY - spriteHeight + 4, spriteWidth, spriteHeight);
+    } else {
+        ctx.translate(x, groundY + supportStress * 2);
+        ctx.rotate(lean * Math.PI / 180);
+        ctx.globalAlpha = clamp(1 - damage * 0.08, 0.88, 1);
+        drawExtraSprite(spriteName, -spriteWidth * 0.5, -spriteHeight, spriteWidth, spriteHeight);
+    }
+
+    ctx.restore();
+    return true;
+}
+
+function civilianSpriteFamily(kind) {
+    if (kind.includes("glass") || kind.includes("office")) return "civilianOffice";
+    if (kind.includes("apartment") || kind.includes("residential")) return "civilianApartment";
+    if (kind.includes("luxury")) return "civilianLuxury";
+    return "civilianTower";
+}
+
+function drawCivilianHazardMarker(x, groundY, width, fullHeight, damage, freshlyHit, supportFraction) {
     const pulse = freshlyHit ? 1 : 0.5 + Math.sin(performance.now() * 0.005 + x * 0.02) * 0.5;
-    const danger = clamp(0.34 + damage * 0.42 + (freshlyHit ? 0.22 : 0), 0.28, 0.82);
-    const label = penaltyValue > 0 ? `CIV $${Math.round(penaltyValue)}` : "CIV";
+    const supportStress = clamp01(1 - supportFraction);
+    const danger = clamp(0.24 + damage * 0.36 + supportStress * 0.24 + (freshlyHit ? 0.22 : 0), 0.22, 0.74);
 
     ctx.save();
     ctx.fillStyle = `rgba(255, 212, 93, ${0.04 + danger * 0.08})`;
@@ -1018,17 +1071,20 @@ function drawCivilianHazardMarker(x, groundY, width, fullHeight, damage, penalty
     ctx.stroke();
     ctx.setLineDash([]);
 
-    const labelY = groundY - fullHeight - 20;
-    const labelWidth = Math.max(54, Math.min(82, label.length * 7.2));
-    ctx.fillStyle = `rgba(32, 22, 18, ${0.72 + damage * 0.14})`;
-    ctx.fillRect(x - labelWidth * 0.5, labelY - 12, labelWidth, 16);
-    ctx.strokeStyle = `rgba(255, 212, 93, ${0.34 + pulse * 0.16})`;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x - labelWidth * 0.5 + 0.5, labelY - 11.5, labelWidth - 1, 15);
-    ctx.fillStyle = "#ffd45d";
-    ctx.font = "800 9px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(label, x, labelY);
+    if (freshlyHit || damage > 0.34 || supportFraction < 0.72) {
+        const label = supportFraction < 0.72 ? "Unstable Tower" : "Civilian Tower";
+        const labelY = groundY - fullHeight - 20;
+        const labelWidth = Math.max(78, Math.min(104, label.length * 7.1));
+        ctx.fillStyle = `rgba(32, 22, 18, ${0.64 + damage * 0.14})`;
+        ctx.fillRect(x - labelWidth * 0.5, labelY - 12, labelWidth, 16);
+        ctx.strokeStyle = `rgba(255, 212, 93, ${0.28 + pulse * 0.14})`;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - labelWidth * 0.5 + 0.5, labelY - 11.5, labelWidth - 1, 15);
+        ctx.fillStyle = "#ffd45d";
+        ctx.font = "800 9px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(label, x, labelY);
+    }
     ctx.restore();
 }
 
@@ -1073,13 +1129,34 @@ function drawBuildingCracks(left, top, width, height, damage, color, seed) {
     }
 }
 
-function drawBuildingRubbleScatter(x, groundY, width, fullHeight, damage, palette, seed) {
-    const count = Math.ceil(damage * 18);
+function drawBuildingRubbleScatter(x, groundY, width, fullHeight, damage, palette, seed, kind) {
+    const glass = kind.includes("glass") || kind.includes("office");
+    const luxury = kind.includes("luxury");
+    const apartment = kind.includes("apartment");
+    const count = Math.ceil(damage * (glass ? 28 : apartment ? 22 : 18));
     for (let i = 0; i < count; i++) {
         const rx = x - width * 0.55 + (hash2d(seed + i, 17) % Math.max(1, Math.floor(width * 1.1)));
         const ry = groundY - (hash2d(19, seed + i) % Math.max(8, Math.floor(fullHeight * 0.16)));
-        ctx.fillStyle = i % 2 ? palette.side : palette.dark;
-        ctx.fillRect(rx, ry, 4 + (i % 3), 3 + (i % 2));
+        if (glass) {
+            ctx.fillStyle = i % 4 === 0 ? "rgba(207, 245, 255, 0.9)" : "rgba(63, 159, 190, 0.82)";
+            ctx.beginPath();
+            ctx.moveTo(rx, ry - 4);
+            ctx.lineTo(rx + 3 + (i % 3), ry + 2);
+            ctx.lineTo(rx - 2, ry + 1);
+            ctx.closePath();
+            ctx.fill();
+        } else if (luxury && i % 4 === 0) {
+            ctx.strokeStyle = "rgba(214, 171, 85, 0.9)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(rx - 2, ry - 3);
+            ctx.lineTo(rx + 5, ry + 2);
+            ctx.stroke();
+        } else {
+            ctx.fillStyle = i % 3 === 0 && luxury ? palette.light : i % 2 ? palette.side : palette.dark;
+            const debrisWidth = apartment ? 5 + (i % 4) : 4 + (i % 3);
+            ctx.fillRect(rx, ry, debrisWidth, 3 + (i % 2));
+        }
     }
 }
 
@@ -1106,15 +1183,17 @@ function drawCollapsedBuildingRubble(x, groundY, width, fullHeight, palette, see
     ctx.stroke();
 }
 
-function drawCivilianWarning(x, y, damage, collapsed) {
+function drawCivilianWarning(x, y, damage, collapsed, supportFraction = 1) {
+    const label = collapsed ? "Tower Down" : supportFraction < 0.72 ? "Unstable" : "Tower Hit";
+    const width = label === "Tower Down" ? 72 : label === "Tower Hit" ? 60 : 58;
     ctx.save();
     ctx.globalAlpha = collapsed ? 0.92 : clamp(0.38 + damage * 0.6, 0.38, 0.9);
     ctx.fillStyle = "rgba(32, 22, 18, 0.78)";
-    ctx.fillRect(x - 24, y - 12, 48, 16);
+    ctx.fillRect(x - width * 0.5, y - 12, width, 16);
     ctx.fillStyle = collapsed ? "#ff6961" : "#ffd45d";
     ctx.font = "700 10px system-ui, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(collapsed ? "CIV HIT" : "AVOID", x, y);
+    ctx.fillText(label, x, y);
     ctx.restore();
 }
 
@@ -3087,21 +3166,45 @@ function drawCivilianImpactEffects(impacts, elapsedMs, progress) {
     const t = Math.min(1.3, elapsedMs / 1000);
     for (let i = 0; i < impacts.length; i++) {
         const impact = impacts[i];
+        const kind = String(impact.kind ?? "").toLowerCase();
+        const glass = kind.includes("glass") || kind.includes("office");
+        const apartment = kind.includes("apartment");
+        const luxury = kind.includes("luxury");
         const burst = Math.max(12, Math.min(42, impact.damage * 0.7));
         const fade = Math.max(0, 1 - progress * 0.85);
-        ctx.fillStyle = `rgba(80, 64, 48, ${0.22 * fade})`;
+        ctx.fillStyle = glass
+            ? `rgba(65, 112, 125, ${0.17 * fade})`
+            : luxury
+                ? `rgba(126, 111, 87, ${0.2 * fade})`
+                : `rgba(80, 64, 48, ${0.22 * fade})`;
         ctx.beginPath();
         ctx.ellipse(impact.x, impact.y - 8 - t * 14, burst * (0.8 + t), burst * 0.28, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        const count = impact.collapsed ? 22 : 12;
+        const count = impact.collapsed ? glass ? 30 : apartment ? 26 : 22 : glass ? 18 : 12;
         for (let p = 0; p < count; p++) {
             const angle = -Math.PI + (Math.PI * 2 * p / count) + hash2d(i, p) * 0.0008;
             const speed = (impact.collapsed ? 42 : 28) + (hash2d(p, i) % 48);
             const x = impact.x + Math.cos(angle) * speed * t;
             const y = Math.min(terrainSurfaceY(x) - 2, impact.y - 28 + Math.sin(angle) * speed * t + 120 * t * t);
-            ctx.fillStyle = p % 3 === 0 ? "rgba(226, 211, 164, 0.82)" : "rgba(92, 74, 58, 0.84)";
-            ctx.fillRect(x - 2, y - 2, 4 + (p % 3), 3 + (p % 2));
+            if (glass) {
+                ctx.fillStyle = p % 3 === 0 ? "rgba(211, 248, 255, 0.9)" : "rgba(55, 154, 188, 0.86)";
+                ctx.beginPath();
+                ctx.moveTo(x, y - 4);
+                ctx.lineTo(x + 4 + (p % 3), y + 2);
+                ctx.lineTo(x - 2, y + 1);
+                ctx.closePath();
+                ctx.fill();
+            } else {
+                ctx.fillStyle = luxury && p % 4 === 0
+                    ? "rgba(219, 174, 84, 0.88)"
+                    : p % 3 === 0
+                        ? "rgba(226, 211, 164, 0.82)"
+                        : apartment
+                            ? "rgba(104, 94, 82, 0.86)"
+                            : "rgba(92, 74, 58, 0.84)";
+                ctx.fillRect(x - 2, y - 2, (apartment ? 5 : 4) + (p % 3), 3 + (p % 2));
+            }
         }
 
         if (impact.penalty > 0) {

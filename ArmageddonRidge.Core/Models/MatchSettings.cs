@@ -9,13 +9,15 @@ namespace ArmageddonRidge.Core.Models;
 /// <param name="RoundLimit">Maximum campaign-style rounds before ending a run.</param>
 /// <param name="EnableNuclearWeapons">Whether nuclear weapons can appear and be used.</param>
 /// <param name="EnableShop">Whether the player starts rounds in the shop phase.</param>
+/// <param name="EnableCivilianStructures">Whether civilian towers are seeded and participate in physics.</param>
 public sealed record MatchSettings(
     Difficulty Difficulty = Difficulty.Normal,
     int StartingCash = GameConstants.StartingCash,
     int? TerrainSeed = null,
     int RoundLimit = 10,
     bool EnableNuclearWeapons = true,
-    bool EnableShop = true);
+    bool EnableShop = true,
+    bool EnableCivilianStructures = true);
 
 /// <summary>
 /// Persisted browser-local progression and preferences.
@@ -48,6 +50,7 @@ public sealed record SaveGame(
 /// <param name="TargetingComputerEnabledByDefault">Whether the targeting computer is granted without shop purchase.</param>
 /// <param name="RenderMode">Preferred battlefield renderer backend.</param>
 /// <param name="WebGpuEffectsEnabled">Whether the optional WebGPU visual effects overlay should run when supported.</param>
+/// <param name="EnableCivilianStructures">Whether civilian towers are seeded and participate in physics.</param>
 public sealed record GameSettings(
     float MasterVolume = 0.8f,
     float SfxVolume = 0.9f,
@@ -59,7 +62,8 @@ public sealed record GameSettings(
     int StartingCash = GameConstants.StartingCash,
     bool TargetingComputerEnabledByDefault = true,
     RenderMode RenderMode = RenderMode.Hybrid,
-    bool WebGpuEffectsEnabled = true)
+    bool WebGpuEffectsEnabled = true,
+    bool EnableCivilianStructures = true)
 {
     public GameSettings Normalize() => this with
     {
