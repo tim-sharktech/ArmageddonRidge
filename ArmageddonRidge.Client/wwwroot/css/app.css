@@ -798,6 +798,17 @@ select {
     scrollbar-gutter: stable;
 }
 
+.modal-card {
+    align-content: start;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.modal-card h3,
+.modal-card p {
+    margin: 0;
+}
+
 .shop-list h3 {
     margin: 12px 0 0;
     color: var(--accent);
