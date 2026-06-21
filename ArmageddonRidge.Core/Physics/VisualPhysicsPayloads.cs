@@ -107,6 +107,9 @@ public readonly record struct ProjectileAirProfile(
         if (weapon.Id == WeaponIds.Gbu57Mop)
             return new ProjectileAirProfile(0.00035f, 0.12f, 0f, 0f, 900f);
 
+        if (weapon.Id == WeaponIds.NapalmFlask)
+            return new ProjectileAirProfile(0.001f, 1.12f, 0f, 0.005f, 680f);
+
         var baseProfile = weapon.BehaviorType switch
         {
             WeaponBehaviorType.Missile => new ProjectileAirProfile(0.018f, 0.34f, 15f, 0.02f, 720f),

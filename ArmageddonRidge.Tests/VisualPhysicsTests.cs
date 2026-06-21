@@ -151,7 +151,8 @@ public sealed class VisualPhysicsTests
     [Theory]
     [InlineData(WeaponIds.SplitterMirv, 720, 900)]
     [InlineData(WeaponIds.Gbu57Mop, 680, 850)]
-    public void HeavySpecialWeaponsPreserveReadableLongRange(string weaponId, float minimumX, float maximumX)
+    [InlineData(WeaponIds.NapalmFlask, 580, 730)]
+    public void SpecializedWeaponsPreserveReadableLongRange(string weaponId, float minimumX, float maximumX)
     {
         var terrain = new TerrainMask(GameConstants.WorldWidth, GameConstants.WorldHeight, Enumerable.Repeat(680f, GameConstants.WorldWidth).ToArray());
         var player = Tank("player", 160, terrain, 42);
